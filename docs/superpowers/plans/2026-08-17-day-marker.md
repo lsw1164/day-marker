@@ -55,6 +55,7 @@ components.json           shadcn config (generated)
 .env.local.example        VITE_GOOGLE_CLIENT_ID placeholder
 src/
   main.tsx                React root
+  vite-env.d.ts           types import.meta.env; names VITE_GOOGLE_CLIENT_ID
   index.css               tailwind import + shadcn theme tokens
   lib/
     utils.ts              shadcn `cn` helper (generated)
@@ -4094,7 +4095,38 @@ Wires everything into the single scrolling page with the sticky action button.
 - Create: `src/ui/links.ts`
 - Create: `src/ui/ResultSummary.tsx`
 - Create: `src/ui/App.tsx`
+- Create: `src/vite-env.d.ts`
 - Modify: `src/main.tsx`
+
+**Step 0 — type `import.meta.env`.** This belongs to Task 1's scaffolding and was omitted
+there; it surfaces here because `main.tsx` is the first file in the codebase to read
+`import.meta.env`. Without it, `npm run typecheck` and `npm run build` both fail with
+`TS2339: Property 'env' does not exist on type 'ImportMeta'`.
+
+Create `src/vite-env.d.ts`:
+
+```ts
+/// <reference types="vite/client" />
+
+interface ImportMetaEnv {
+  /**
+   * Public by design — this ships in the bundle and is not a secret. Optional
+   * because a checkout without `.env.local` genuinely has no value here, which is
+   * the case `createAuth`'s MISSING_CLIENT_ID sentinel exists to report.
+   */
+  readonly VITE_GOOGLE_CLIENT_ID?: string
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv
+}
+```
+
+The triple-slash reference is what makes this work despite `tsconfig.json`'s `types`
+array excluding everything but `vitest/globals` and jest-dom: an explicit
+`/// <reference types="…" />` is independent of that array. Declaring
+`VITE_GOOGLE_CLIENT_ID` as optional rather than `string` is deliberate — it keeps
+`main.tsx`'s `?? ''` meaningful instead of dead code.
 - Test: `src/ui/links.test.ts`
 - Test: `src/ui/ResultSummary.test.tsx`
 - Test: `src/ui/App.test.tsx`
