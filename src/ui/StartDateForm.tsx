@@ -1,7 +1,7 @@
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { MAX_YEARS, MIN_YEARS, YEAR_OPTIONS } from '@/domain/milestones'
-import { REMINDER_LABELS, REMINDER_ORDER, type ReminderPreset } from '@/domain/reminders'
+import { REMINDER_ORDER, type ReminderPreset } from '@/domain/reminders'
 import { COPY } from '@/ui/copy'
 
 const SELECT_CLASS =
@@ -85,7 +85,7 @@ export function StartDateForm({
           >
             {REMINDER_ORDER.map((preset) => (
               <option key={preset} value={preset}>
-                {REMINDER_LABELS[preset]}
+                {COPY.reminderLabels[preset]}
               </option>
             ))}
           </select>

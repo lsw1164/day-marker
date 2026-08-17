@@ -1,3 +1,4 @@
+import type { ReminderPreset } from '@/domain/reminders'
 import type { ItemOutcome } from '@/google/apply'
 import type { PlanItem, PlanStatus } from '@/google/plan'
 
@@ -15,6 +16,14 @@ export const COPY = {
   range: 'Range',
   reminder: 'Reminder',
   yearsOption: (n: number) => (n === 1 ? '1 year' : `${n} years`),
+  // Every string the user reads lives here, including these — `domain/reminders.ts`
+  // owns the minute arithmetic, not the wording.
+  reminderLabels: {
+    none: 'No reminder',
+    day1: '1 day before, 9:00 AM',
+    day3: '3 days before, 9:00 AM',
+    week1: '1 week before, 9:00 AM',
+  } satisfies Record<ReminderPreset, string>,
 
   pickADate: 'Pick a start date to see your milestones.',
   milestoneCount: (n: number) => (n === 1 ? '1 milestone' : `${n} milestones`),

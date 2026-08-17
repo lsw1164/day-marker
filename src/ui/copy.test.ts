@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { actionLabel, countPlan, COPY, outcomeLabel } from '@/ui/copy'
+import { REMINDER_ORDER } from '@/domain/reminders'
 import type { PlanItem, PlanStatus } from '@/google/plan'
 import { computeMilestones } from '@/domain/milestones'
 import { calendarDate } from '@/domain/calendarDate'
@@ -42,6 +43,17 @@ describe('actionLabel', () => {
 
   it('says so when everything selected is already up to date', () => {
     expect(actionLabel({ add: 0, update: 0, restore: 0, selected: 4 })).toBe(COPY.alreadyUpToDate)
+  })
+})
+
+describe('COPY.reminderLabels', () => {
+  it('names every preset in REMINDER_ORDER', () => {
+    // These four strings previously lived in domain/reminders.ts with no test
+    // anywhere. A preset added without its label would render as blank text.
+    for (const preset of REMINDER_ORDER) {
+      expect(COPY.reminderLabels[preset]).toBeTruthy()
+    }
+    expect(Object.keys(COPY.reminderLabels).sort()).toEqual([...REMINDER_ORDER].sort())
   })
 })
 

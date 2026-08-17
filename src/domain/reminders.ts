@@ -16,12 +16,9 @@ export const REMINDER_MINUTES: Record<ReminderPreset, number | null> = {
   week1: 9540,
 }
 
-export const REMINDER_LABELS: Record<ReminderPreset, string> = {
-  none: 'No reminder',
-  day1: '1 day before, 9:00 AM',
-  day3: '3 days before, 9:00 AM',
-  week1: '1 week before, 9:00 AM',
-}
+// The user-facing labels for these presets live in `ui/copy.ts`, not here.
+// `domain/` owns the arithmetic; every English string the user reads belongs in
+// one place, and four of them hiding in the domain layer defeats that.
 
 export const REMINDER_ORDER: ReminderPreset[] = ['none', 'day1', 'day3', 'week1']
 
