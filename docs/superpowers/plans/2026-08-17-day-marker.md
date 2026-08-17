@@ -26,22 +26,28 @@ These apply to every task. Values are copied verbatim from the spec.
 - **All user-facing copy is English string literals.** No i18n layer, no message catalog, no locale detection.
 - **Never put the access token in `localStorage`** or any persistent storage. Module-level variable only.
 - **`VITE_GOOGLE_CLIENT_ID` is public by design** and ships in the bundle. There is no client secret in this flow.
-- **Node 20+** and npm. All commands run from the repo root, `/Users/sw/projects/day-marker`.
+- **Node 20+** and npm. All commands run from the repo root.
+- **`src/` may not import Node builtins.** `tsconfig.json` omits `"node"` from `types` on
+  purpose; `vite.config.ts` and `vitest.setup.ts` live at the repo root under
+  `tsconfig.node.json`. Never widen `tsconfig.json`'s `types` to fix an import error.
+- **`vitest` must stay on a major whose `vite` peer range includes the installed `vite`**
+  (currently vitest `^4.1.10` with vite `6.4.3`). A mismatch silently nests a second vite
+  and the test runner then executes a different major than `vite build`.
 
 ## File Structure
 
 ```
 package.json              deps and scripts
 vite.config.ts            vite + react + tailwind plugins, vitest config, @/ alias
-tsconfig.json             app config, @/* path alias
-tsconfig.node.json        config for vite.config.ts itself
+vitest.setup.ts           jest-dom matchers; guarantees crypto.subtle
+tsconfig.json             app config, @/* path alias — browser-only, no Node types
+tsconfig.node.json        config for vite.config.ts and vitest.setup.ts
 index.html               entry; loads the GIS script
 components.json           shadcn config (generated)
 .env.local.example        VITE_GOOGLE_CLIENT_ID placeholder
 src/
   main.tsx                React root
   index.css               tailwind import + shadcn theme tokens
-  vitest.setup.ts         jest-dom matchers; guarantees crypto.subtle
   lib/
     utils.ts              shadcn `cn` helper (generated)
     mapWithLimit.ts       bounded-concurrency map returning settled results
@@ -70,6 +76,12 @@ src/
 ```
 
 Tests live beside their subjects as `*.test.ts` / `*.test.tsx`. `domain/` never imports from `google/`; `ui/` never calls `fetch`.
+
+**`src/` is browser-only at the type level.** `tsconfig.json`'s `types` array deliberately
+omits `"node"`, so importing `node:fs` (or any Node builtin) anywhere under `src/` is a type
+error. The two files that legitimately run in Node — `vite.config.ts` and `vitest.setup.ts` —
+live at the repo root and are typed by `tsconfig.node.json`. Do not add `"node"` to
+`tsconfig.json` to resolve an import error; move the file that needs Node instead.
 
 ---
 
