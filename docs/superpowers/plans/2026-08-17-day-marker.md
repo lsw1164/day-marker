@@ -2063,9 +2063,13 @@ import type { RetryDeps } from '@/lib/backoff'
 
 const START = calendarDate('2026-01-01')
 const OPTIONS: EventOptions = { start: START, label: '', reminder: 'day1' }
-const MILESTONES = computeMilestones(START, 1)
 
 const RETRY: RetryDeps = { attempts: 3, baseMs: 1, sleep: async () => {}, random: () => 0.5 }
+
+// Thirteen milestones, so a test can use more items than APPLY_CONCURRENCY (3).
+// The halt can only short-circuit items still QUEUED, so a 3-item test would
+// leave nothing queued and could never observe it.
+const MILESTONES = computeMilestones(START, 3)
 
 function item(index: number, status: PlanStatus, needsUpdate = false): PlanItem {
   return {
@@ -2190,11 +2194,19 @@ describe('applyPlan — halting on auth loss', () => {
     const insertEvent = vi.fn(async () => {
       throw new Unauthorized(401, 'authError', '')
     })
-    const items = [item(0, 'new'), item(1, 'new'), item(2, 'new')]
+    // FIVE items against APPLY_CONCURRENCY of 3. The halt can only short-circuit
+    // items still QUEUED: the first three are already in flight when the 401
+    // lands, so they fail with the real error, and items 4 and 5 are the ones the
+    // halt actually protects. A 3-item version of this test asserts something
+    // structurally impossible — nothing is ever queued, so HALTED_MESSAGE can
+    // never appear.
+    const items = [item(0, 'new'), item(1, 'new'), item(2, 'new'), item(3, 'new'), item(4, 'new')]
     const results = await applyPlan(stubApi({ insertEvent }), items, OPTIONS, () => {}, RETRY)
-    expect(results).toHaveLength(3)
+    expect(results).toHaveLength(5)
     expect(results.every((r) => r.outcome === 'failed')).toBe(true)
-    expect(results.some((r) => r.error === HALTED_MESSAGE)).toBe(true)
+    expect(results.filter((r) => r.error === HALTED_MESSAGE)).toHaveLength(2)
+    // The point of halting: two doomed requests were never sent.
+    expect(insertEvent).toHaveBeenCalledTimes(3)
   })
 
   it('keeps results that already succeeded', async () => {
