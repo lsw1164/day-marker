@@ -105,7 +105,7 @@ DST boundary, so the type system keeps it out.
 
 | Kind | Rule | Label | Example (start = 2026-01-01) |
 |---|---|---|---|
-| `day` | `start + (N − 1) days` | `Day ${N}` | Day 100 → 2026-04-09 |
+| `day` | `start + (N − 1) days` | `Day ${N}` | Day 100 → 2026-04-10 |
 | `year` | same month/day, N years later | `${k} Year(s)` | 1 Year → 2027-01-01 |
 
 The day rule is the Korean convention: **the start date is day 1**, so Day 100 is
@@ -151,8 +151,8 @@ Hashing uses `crypto.subtle.digest('SHA-256', …)`, which is async and
   "id": "dm…",
   "summary": "Anna & Ben: Day 100",   // `${label}: ${milestoneLabel}`, label optional
   "description": "Day Marker · Started 2026-01-01",
-  "start": { "date": "2026-04-09" },
-  "end":   { "date": "2026-04-10" },  // exclusive
+  "start": { "date": "2026-04-10" },
+  "end":   { "date": "2026-04-11" },  // exclusive
   "transparency": "transparent",       // an anniversary must not mark you busy
   "reminders": { "useDefault": false, "overrides": [{ "method": "popup", "minutes": 900 }] },
   "extendedProperties": {
@@ -331,7 +331,7 @@ flow is interactive and cannot run headless.
 
 `domain/` — table-driven, and the bulk of the value:
 
-- Counting boundary: start 2026-01-01 → Day 100 = 2026-04-09 (not 04-10).
+- Counting boundary: start 2026-01-01 → Day 100 = 2026-04-10 (`start + 99`, not `start + 100`, which would be 04-11).
 - Year milestones are calendar-based: 1 Year = 2027-01-01, not `start + 365`.
 - Leap year: start 2024-02-29 → 1 Year = 2025-02-28.
 - Horizon: `years = 3` yields exactly 13 milestones; `years = 1` yields 4.
