@@ -4616,7 +4616,7 @@ Expected: all green.
 
 ```bash
 git add src/ui/links.ts src/ui/links.test.ts src/ui/ResultSummary.tsx src/ui/ResultSummary.test.tsx \
-        src/ui/App.tsx src/ui/App.test.tsx src/main.tsx
+        src/ui/App.tsx src/ui/App.test.tsx src/main.tsx src/vite-env.d.ts
 git commit -m "feat(ui): compose the single-page flow with result summary"
 ```
 
