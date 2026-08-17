@@ -844,7 +844,28 @@ describe('eventIdFor', () => {
   it('does not depend on anything but start date and key', async () => {
     // There is no third parameter by construction. This test documents the
     // constraint so a future signature change has to break it deliberately.
+    // NOTE: arity alone is weak evidence — `(a, b) => Date.now()` also has
+    // length 2. The golden test below is what actually pins the digest input.
     expect(eventIdFor.length).toBe(2)
+  })
+
+  // The golden test. Determinism tests only prove stability WITHIN one run;
+  // nothing above would notice if the hash input format changed. Bumping
+  // 'daymarker/v1/' to v2, swapping the start/key order, changing the
+  // separator, or altering PREFIX/HASH_LENGTH would keep every other test
+  // green while silently reassigning the ID of every milestone already in
+  // every user's calendar — orphaning the old events and duplicating the set.
+  //
+  // These values were computed independently from the spec, not read back out
+  // of the implementation. If one of them ever fails, do NOT update it to make
+  // the suite pass: that failure means the ID derivation changed, and changing
+  // it is a migration, not a refactor.
+  it('pins the exact ID derivation', async () => {
+    expect(await eventIdFor(START, 'd100')).toBe('dmusufolgh698n4mircpsr487stm1q6n')
+    expect(await eventIdFor(START, 'y1')).toBe('dm5gk8fe9g3mbped70mkc928ssaksirg')
+    expect(await eventIdFor(calendarDate('2025-03-14'), 'd100')).toBe(
+      'dm8143fosu8qgh660f7f9c41r9k5882i',
+    )
   })
 })
 ```
@@ -899,7 +920,14 @@ export async function eventIdFor(start: CalendarDate, key: string): Promise<stri
 }
 ```
 
-`value` never exceeds 12 bits before the `<< 8`, so the shift stays inside 32-bit range.
+**Why the accumulator is overflow-safe** — the obvious explanation is wrong, so read this
+before "simplifying" it. `value` is never masked after an extraction, so stale already-emitted
+bits keep accumulating: over a 32-byte digest it reaches 31 bits, not the ~12 you might expect.
+It is nonetheless correct, because JavaScript's `<<` truncates from the *high* end, while the
+live unconsumed remainder (`bits ≤ 4`, tracked separately) always sits in the *lowest* bit
+positions. After any `<< 8` those live bits land at position ≤ 11, far below the 32-bit
+ceiling; only stale bits that have already been emitted get discarded. Masking `value` after
+each extraction would also be correct, but is not required.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
