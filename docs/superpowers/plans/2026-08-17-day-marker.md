@@ -3219,7 +3219,9 @@ git commit -m "feat(ui): add copy catalogue and the phase state machine"
 
 The presentational half. `buildRows` collapses five phases into one row shape so the list component has no branching in it.
 
-Use **native `<select>` and `<input type="checkbox">`**, not the Radix-backed shadcn versions: Radix Select needs pointer-event shims that jsdom lacks, and `<input type="date">` already gives a real date picker that emits `YYYY-MM-DD` — exactly `CalendarDate`'s format, with no date-picker dependency.
+Use **native `<select>` and `<input type="checkbox">`**, not the generated shadcn versions. `shadcn@latest` now emits `@base-ui/react`-backed components, and its `Select` is a composed `Popup`/`Positioner`/`ItemIndicator` assembly that needs pointer-event shims jsdom lacks. A native `<select>` is testable and sufficient here. Likewise `<input type="date">` already gives a real date picker that emits `YYYY-MM-DD` — exactly `CalendarDate`'s format, with no date-picker dependency.
+
+**The generated `checkbox.tsx` and `select.tsx` therefore go unused.** That is expected, not an oversight.
 
 **Files:**
 - Create: `src/ui/rows.ts`
@@ -4066,10 +4068,13 @@ export function ResultSummary({ results, onRetry, onReset }: ResultSummaryProps)
               {COPY.startOver}
             </Button>
             {first && (
-              <Button asChild className="flex-1">
-                <a href={calendarDayUrl(first)} target="_blank" rel="noreferrer">
-                  {COPY.viewInCalendar}
-                </a>
+              // shadcn's Button is @base-ui/react-backed: it has no `asChild`.
+              // base-ui composes via a `render` element instead.
+              <Button
+                className="flex-1"
+                render={<a href={calendarDayUrl(first)} target="_blank" rel="noreferrer" />}
+              >
+                {COPY.viewInCalendar}
               </Button>
             )}
           </>
@@ -4143,13 +4148,15 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
       </header>
 
       {!gisReady && (
-        <Alert role="alert" variant="destructive">
+        {/* shadcn's Alert already sets role="alert" itself. */}
+        <Alert variant="destructive">
           <AlertDescription>{COPY.scriptBlocked}</AlertDescription>
         </Alert>
       )}
 
       {state.error && (
-        <Alert role="alert" variant="destructive">
+        {/* shadcn's Alert already sets role="alert" itself. */}
+        <Alert variant="destructive">
           <AlertDescription>{state.error}</AlertDescription>
         </Alert>
       )}
