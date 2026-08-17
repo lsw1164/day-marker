@@ -2374,6 +2374,8 @@ Wraps the browser token client. The one hard rule: `requestAccessToken()` runs s
   - `interface Auth { connect(prompt?: GisPrompt): Promise<string>; token(): string | null; clear(): void }`
   - `SIGN_IN_IN_PROGRESS = 'sign_in_in_progress'` — sentinel rejecting a second `connect()`
     while one is still pending, so the first caller's promise is never stranded
+  - `SIGN_IN_CANCELLED = 'sign_in_cancelled'` — sentinel `clear()` rejects a pending call with,
+    rather than dropping it and stranding the caller. `useDayMarker` swallows both sentinels.
   - `type GisPrompt = '' | 'consent' | 'select_account'`
   - `createAuth(clientId: string, getGis?: () => GoogleIdentity | undefined, now?: () => number): Auth`
   - `whenGisReady(timeoutMs?: number, getGis?, sleep?): Promise<boolean>`
@@ -2389,6 +2391,7 @@ import {
   CALENDAR_SCOPE,
   createAuth,
   MISSING_CLIENT_ID,
+  SIGN_IN_CANCELLED,
   SIGN_IN_IN_PROGRESS,
   whenGisReady,
   type GoogleIdentity,
@@ -2508,12 +2511,31 @@ describe('createAuth.connect', () => {
   it('clear() releases a pending slot that never got a callback', async () => {
     const h = harness()
     const auth = createAuth('client-1', () => h.gis)
-    void auth.connect() // never fired — simulates GIS going silent
+    const abandoned = auth.connect() // never fired — simulates GIS going silent
     auth.clear()
-    // Not bricked: a later attempt proceeds instead of rejecting forever.
+    // Rejected, not dropped: dropping would strand this promise forever, which
+    // is the same defect the re-entrancy guard exists to prevent.
+    await expect(abandoned).rejects.toThrow(SIGN_IN_CANCELLED)
+    // And not bricked: a later attempt proceeds instead of rejecting forever.
     const retry = auth.connect()
     h.fire({ access_token: 'tok', expires_in: 3600, scope: CALENDAR_SCOPE })
     expect(await retry).toBe('tok')
+  })
+
+  it('clear() rejects a genuinely in-flight call rather than stranding it', async () => {
+    // The narrower hazard: clear() racing a live popup, not a silent one. A late
+    // GIS callback then finds an empty slot and returns without settling, so the
+    // caller would hang if clear() had merely nulled the slot.
+    const h = harness()
+    const auth = createAuth('client-1', () => h.gis)
+    const inFlight = auth.connect()
+    auth.clear()
+    await expect(inFlight).rejects.toThrow(SIGN_IN_CANCELLED)
+    // A callback arriving after the clear is ignored and must not throw.
+    expect(() =>
+      h.fire({ access_token: 'late', expires_in: 3600, scope: CALENDAR_SCOPE }),
+    ).not.toThrow()
+    expect(auth.token()).toBeNull()
   })
 
   it('passes the prompt through to Google', () => {
@@ -2616,6 +2638,17 @@ export const MISSING_CLIENT_ID = 'missing_client_id'
  * tell them.
  */
 export const SIGN_IN_IN_PROGRESS = 'sign_in_in_progress'
+
+/**
+ * Sentinel for "a pending sign-in was abandoned by `clear()`". `clear()` must
+ * REJECT a live pending call rather than silently drop it: dropping would remove
+ * the only reference to that call's resolver and strand it forever — the exact
+ * bug the `connect()` re-entrancy guard exists to prevent, reached through a
+ * different door. Rejecting is always safe; an awaiting caller gets an error
+ * instead of a hang. `useDayMarker` swallows this one, since `clear()` is only
+ * called on a path that is already reporting its own error.
+ */
+export const SIGN_IN_CANCELLED = 'sign_in_cancelled'
 
 /** '' re-authorizes silently when consent already exists. */
 export type GisPrompt = '' | 'consent' | 'select_account'
@@ -2772,9 +2805,14 @@ export function createAuth(
     clear() {
       accessToken = null
       expiresAt = 0
-      // Also releases a pending slot, so a connect() that never got a callback
-      // cannot brick every later attempt.
+      // Releases a pending slot so a connect() that never got a callback cannot
+      // brick every later attempt — but REJECTS it rather than dropping it.
+      // Dropping would remove the only reference to a live call's resolver and
+      // strand it forever, which is the very bug the re-entrancy guard above
+      // prevents. Rejecting turns a hang into an error, which is always safe.
+      const pending = settle
       settle = null
+      pending?.reject(new AuthError(SIGN_IN_CANCELLED))
     },
   }
 }
@@ -3233,6 +3271,7 @@ import { DEFAULT_REMINDER, type ReminderPreset } from '@/domain/reminders'
 import { applyPlan, type ItemResult } from '@/google/apply'
 import {
   MISSING_CLIENT_ID,
+  SIGN_IN_CANCELLED,
   SIGN_IN_IN_PROGRESS,
   type Auth,
   type GisPrompt,
@@ -3337,9 +3376,14 @@ export function useDayMarker({
         setError(null)
         setConnected(true)
       } catch (e) {
+        const message = e instanceof Error ? e.message : ''
         // A double-click: the popup the user already opened is still open, so
         // there is nothing to tell them and nothing to change.
-        if (e instanceof Error && e.message === SIGN_IN_IN_PROGRESS) return
+        if (message === SIGN_IN_IN_PROGRESS) return
+        // clear() abandoned this call. The path that called clear() is already
+        // reporting its own error; overwriting it with this one would replace the
+        // real cause with a symptom.
+        if (message === SIGN_IN_CANCELLED) return
         setError(describe(e))
         setConnected(false)
       }
