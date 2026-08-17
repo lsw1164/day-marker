@@ -2367,6 +2367,9 @@ Wraps the browser token client. The one hard rule: `requestAccessToken()` runs s
 - Consumes: nothing
 - Produces:
   - `CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events'`
+  - `MISSING_CLIENT_ID = 'missing_client_id'` — sentinel `AuthError` message for an unset
+    `VITE_GOOGLE_CLIENT_ID`; `useDayMarker` maps it to `COPY.missingClientId` so the copy
+    stays in `ui/` and `google/` never imports from `ui/`
   - `class AuthError extends Error`
   - `interface Auth { connect(prompt?: GisPrompt): Promise<string>; token(): string | null; clear(): void; revoke(): void }`
   - `type GisPrompt = '' | 'consent' | 'select_account'`
@@ -2379,7 +2382,13 @@ Create `src/google/auth.test.ts`:
 
 ```ts
 import { describe, expect, it, vi } from 'vitest'
-import { AuthError, CALENDAR_SCOPE, createAuth, type GoogleIdentity } from '@/google/auth'
+import {
+  AuthError,
+  CALENDAR_SCOPE,
+  createAuth,
+  MISSING_CLIENT_ID,
+  type GoogleIdentity,
+} from '@/google/auth'
 
 interface Harness {
   gis: GoogleIdentity
@@ -2458,6 +2467,15 @@ describe('createAuth.connect', () => {
     await expect(auth.connect()).rejects.toBeInstanceOf(AuthError)
   })
 
+  it('rejects with the sentinel when the client ID is empty', async () => {
+    // A first run without .env.local. Without this, Google returns an opaque
+    // error and the developer has no idea the client ID is the problem.
+    const h = harness()
+    const auth = createAuth('', () => h.gis)
+    await expect(auth.connect()).rejects.toThrow(MISSING_CLIENT_ID)
+    expect(h.requestAccessToken).not.toHaveBeenCalled()
+  })
+
   it('passes the prompt through to Google', () => {
     const h = harness()
     createAuth('client-1', () => h.gis).connect('select_account')
@@ -2513,6 +2531,13 @@ Expected: FAIL — `Failed to resolve import "@/google/auth"`.
 
 ```ts
 export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events'
+
+/**
+ * Sentinel for "VITE_GOOGLE_CLIENT_ID was never set". The human-readable copy
+ * lives in `ui/copy.ts`; this layer only signals the condition, which keeps the
+ * rule that `google/` never imports from `ui/`.
+ */
+export const MISSING_CLIENT_ID = 'missing_client_id'
 
 /** '' re-authorizes silently when consent already exists. */
 export type GisPrompt = '' | 'consent' | 'select_account'
@@ -2632,6 +2657,12 @@ export function createAuth(
 
   return {
     connect(prompt: GisPrompt = '') {
+      // Checked before the script check: a missing client ID is a setup mistake
+      // the developer must fix, and reporting "script has not loaded" for it
+      // would send them hunting the wrong problem.
+      if (!clientId) {
+        return Promise.reject(new AuthError(MISSING_CLIENT_ID))
+      }
       const gis = getGis()
       if (!gis) {
         return Promise.reject(new AuthError('Google sign-in script has not loaded'))
@@ -2782,7 +2813,6 @@ export const COPY = {
   notConnected: 'Not connected',
   connected: 'Connected',
   connect: 'Connect Google account',
-  switchAccount: 'Switch account',
 
   startDate: 'Start date',
   labelField: 'Label — optional',
@@ -2807,7 +2837,6 @@ export const COPY = {
   applying: 'Working…',
   progress: (done: number, total: number) => `${done} of ${total}`,
   queued: 'Queued',
-  sending: 'Sending…',
 
   doneHeadline: (n: number) => (n === 1 ? '1 milestone' : `${n} milestones`),
   doneSubhead: 'added to your calendar',
@@ -2890,7 +2919,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { useDayMarker, type DayMarkerDeps } from '@/ui/useDayMarker'
 import { COPY } from '@/ui/copy'
-import type { Auth } from '@/google/auth'
+import { MISSING_CLIENT_ID, type Auth } from '@/google/auth'
 import type { CalendarApi, GoogleEvent } from '@/google/calendarApi'
 import { Unauthorized } from '@/google/errors'
 import { calendarDate } from '@/domain/calendarDate'
@@ -3009,6 +3038,19 @@ describe('useDayMarker — connecting and probing', () => {
     expect(result.current.error).toBe(COPY.popupBlocked)
   })
 
+  it('translates a missing client ID into setup instructions', async () => {
+    const auth = stubAuth({
+      connect: vi.fn(async () => {
+        throw new Error(MISSING_CLIENT_ID)
+      }),
+    })
+    const { result } = renderHook(() => useDayMarker(deps({ auth })))
+    await act(async () => {
+      await result.current.connect()
+    })
+    expect(result.current.error).toBe(COPY.missingClientId)
+  })
+
   it('re-probes when the reminder changes', async () => {
     const api = stubApi()
     const { result } = renderHook(() => useDayMarker(deps({ api })))
@@ -3103,7 +3145,7 @@ import type { EventOptions } from '@/domain/eventPayload'
 import { computeMilestones, DEFAULT_YEARS } from '@/domain/milestones'
 import { DEFAULT_REMINDER, type ReminderPreset } from '@/domain/reminders'
 import { applyPlan, type ItemResult } from '@/google/apply'
-import type { Auth, GisPrompt } from '@/google/auth'
+import { MISSING_CLIENT_ID, type Auth, type GisPrompt } from '@/google/auth'
 import type { CalendarApi } from '@/google/calendarApi'
 import { buildPlan, type PlanItem } from '@/google/plan'
 import type { RetryDeps } from '@/lib/backoff'
@@ -3119,12 +3161,21 @@ export interface DayMarkerDeps {
   retryDeps?: RetryDeps
 }
 
+/**
+ * Translates the two machine-readable sentinels the auth layer can produce into
+ * copy a person can act on. Everything else passes through unchanged —
+ * 'popup_closed', for instance, means the user dismissed the window on purpose,
+ * which needs no translation.
+ *
+ * This mapping lives here, not in `google/auth.ts`, so that user-facing strings
+ * stay in `ui/` and the google layer never imports from the ui layer.
+ */
 function describe(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
-  // GIS reports a blocked popup as 'popup_failed_to_open', which means nothing to a
-  // user. 'popup_closed' is different — they dismissed it on purpose — so it passes
-  // through unchanged.
-  return message === 'popup_failed_to_open' ? COPY.popupBlocked : message
+  if (message === MISSING_CLIENT_ID) return COPY.missingClientId
+  // GIS reports a blocked popup as 'popup_failed_to_open', which means nothing to a user.
+  if (message === 'popup_failed_to_open') return COPY.popupBlocked
+  return message
 }
 
 export function useDayMarker({
