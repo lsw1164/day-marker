@@ -33,6 +33,14 @@ These apply to every task. Values are copied verbatim from the spec.
 - **`vitest` must stay on a major whose `vite` peer range includes the installed `vite`**
   (currently vitest `^4.1.10` with vite `6.4.3`). A mismatch silently nests a second vite
   and the test runner then executes a different major than `vite build`.
+- **The test suite runs under `TZ=Asia/Seoul`** and the npm scripts must keep setting it.
+  This is not cosmetic. A local-midnight date implementation — the exact regression
+  `CalendarDate` exists to prevent — produces *identical* results under `TZ=UTC` and under
+  US timezones, so a suite run there cannot catch it. Under a positive UTC offset it is off
+  by one day. Korea is UTC+9, so the app's own users sit in the offset class that exposes
+  the bug while a default CI run stays blind to it. Verified empirically: `2026-01-01 + 99`
+  gives `2026-04-10` correctly but `2026-04-09` from a local-midnight implementation under
+  Asia/Seoul, and `2026-04-10` from both under UTC.
 
 ## File Structure
 
@@ -576,6 +584,23 @@ The Korean counting convention lives here: the start date is day 1, so Day 100 i
 **Files:**
 - Create: `src/domain/milestones.ts`
 - Test: `src/domain/milestones.test.ts`
+- Modify: `package.json` (pin the suite's timezone — see Step 0)
+
+**Step 0 — pin the test timezone.** This amends Task 1's scripts, and it belongs here
+because this is the first task whose correctness *is* day arithmetic. Change:
+
+```json
+"test": "TZ=Asia/Seoul vitest run",
+"test:watch": "TZ=Asia/Seoul vitest"
+```
+
+Without this, every date test in Tasks 3, 5, 8, 11 and 12 is blind to the one bug
+`CalendarDate` was built to prevent: a local-midnight implementation returns the *same*
+answers as the correct one under `TZ=UTC` and under US timezones, and only diverges at a
+positive UTC offset. Korea is UTC+9. Pinning turns the existing suite into a real guard
+rather than a sanity check — the already-written `addDays('2026-12-31', 1)` assertion, for
+instance, starts failing against a local-midnight implementation the moment the pin is in.
+All 20 existing tests already pass under it.
 
 **Interfaces:**
 - Consumes: `addDays`, `addYears`, `CalendarDate` from `@/domain/calendarDate`
