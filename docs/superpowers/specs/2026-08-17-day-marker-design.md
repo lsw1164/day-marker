@@ -6,15 +6,19 @@
 ## Overview
 
 A browser-only web app that takes the date a relationship started and writes its
-milestone anniversaries — 100일, 200일, …, 1주년, 2주년 — into the user's Google
-Calendar.
+milestone anniversaries — Day 100, Day 200, …, 1 Year, 2 Years — into the user's
+Google Calendar.
 
 The user enters a start date, sees exactly which dates will be created and which
 already exist, unchecks what they don't want, and clicks once.
 
+**Language:** the interface and the generated event titles are in English. The
+*counting convention* is the Korean one (see Milestones) — that is a rule about
+arithmetic, not about language, and it does not change with the UI copy.
+
 ## Goals
 
-- Compute Korean-convention milestones from a start date, correctly.
+- Compute milestones from a start date, correctly.
 - Write them to the signed-in user's primary Google Calendar as all-day events.
 - Show, before writing, precisely what will happen to each milestone.
 - Be safe to run twice: re-submitting updates rather than duplicates.
@@ -27,12 +31,14 @@ already exist, unchecks what they don't want, and clicks once.
 - No sharing, no partner invites, no notifications of our own — Google Calendar's
   reminders are the notification system.
 - No recurring-event trickery. Each milestone is its own one-off event.
+- No internationalization framework. Copy is English string literals; if a second
+  language is ever wanted, that is a separate piece of work.
 
 ## Constraints
 
 **`calendar.events` is a Google *sensitive* scope.** While the OAuth consent
 screen is in Testing, at most 100 named test users can authorize the app, and
-they see an "이 앱은 확인되지 않았습니다" interstitial. Public launch requires
+they see a "Google hasn't verified this app" interstitial. Public launch requires
 sensitive-scope verification, which Google documents as taking up to 10 days. It
 does *not* require the CASA security assessment that restricted scopes (Gmail,
 Drive) trigger.
@@ -99,20 +105,26 @@ DST boundary, so the type system keeps it out.
 
 | Kind | Rule | Label | Example (start = 2026-01-01) |
 |---|---|---|---|
-| `day` | `start + (N − 1) days` | `${N}일` | 100일 → 2026-04-09 |
-| `year` | same month/day, N years later | `${k}주년` | 1주년 → 2027-01-01 |
+| `day` | `start + (N − 1) days` | `Day ${N}` | Day 100 → 2026-04-09 |
+| `year` | same month/day, N years later | `${k} Year(s)` | 1 Year → 2027-01-01 |
 
-The day rule is the Korean convention: the start date is day 1, so 100일 is
-`start + 99 days`, not `start + 100`.
+The day rule is the Korean convention: **the start date is day 1**, so Day 100 is
+`start + 99 days`, not `start + 100`. This also happens to be what the English
+label literally claims — "day 100" is the 100th day, counting the first one — so
+the label and the arithmetic agree.
 
 `years` (1–10, default 3) sets the horizon at `start + years` calendar years.
 Day milestones step by 100 from 100 while their date falls on or before the
-horizon; year milestones run `1..years`. At the default that yields 100일…1000일
-plus 1–3주년 — **13 events**.
+horizon; year milestones run `1..years`. At the default that yields Day 100…Day
+1000 plus 1–3 Years — **13 events**.
 
-A start date of Feb 29 lands its 주년 on Feb 28 in common years.
+Year labels pluralize: `1 Year`, `2 Years`, `3 Years`.
 
-Each milestone carries a stable `key`: `d100`, `d200`, `y1`, `y2`.
+A start date of Feb 29 lands its year milestones on Feb 28 in common years.
+
+Each milestone carries a stable `key`: `d100`, `d200`, `y1`, `y2`. **Keys are
+independent of display labels** — rewording a label must never change a key,
+because keys feed the event IDs.
 
 ### Deterministic event IDs
 
@@ -126,8 +138,8 @@ prefix is within that alphabet. A test asserts every generated ID matches
 `/^[0-9a-v]{5,1024}$/`, because one stray `w` is a 400 from Google.
 
 **The ID depends on the start date and the milestone key only** — never on the
-title, label, reminder, or `years`. That is the property that makes re-submitting
-an update instead of a duplication, and it must not be weakened.
+title, label, reminder, `years`, or UI language. That is the property that makes
+re-submitting an update instead of a duplication, and it must not be weakened.
 
 Hashing uses `crypto.subtle.digest('SHA-256', …)`, which is async and
 `SecureContext`-only. Localhost and HTTPS both qualify.
@@ -137,8 +149,8 @@ Hashing uses `crypto.subtle.digest('SHA-256', …)`, which is async and
 ```jsonc
 {
   "id": "dm…",
-  "summary": "우리 100일",          // `${label} ${milestoneLabel}`, label optional
-  "description": "Day Marker · 시작일 2026-01-01",
+  "summary": "Anna & Ben: Day 100",   // `${label}: ${milestoneLabel}`, label optional
+  "description": "Day Marker · Started 2026-01-01",
   "start": { "date": "2026-04-09" },
   "end":   { "date": "2026-04-10" },  // exclusive
   "transparency": "transparent",       // an anniversary must not mark you busy
@@ -152,8 +164,10 @@ Hashing uses `crypto.subtle.digest('SHA-256', …)`, which is async and
 `end.date` is **exclusive** for all-day events — a one-day event ends the
 following day. This has its own test and its own line on the manual checklist.
 
-`label` is an optional free-text field; empty means the title is just `100일`.
-Any emoji the user wants goes in the label — we don't inject one.
+`label` is an optional free-text field. Empty means the title is just `Day 100`;
+otherwise it is `${label}: ${milestoneLabel}`, which reads well and sorts sensibly
+in a calendar list. Any emoji the user wants goes in the label — we don't inject
+one.
 
 `extendedProperties.private` costs nothing to write and preserves a real option:
 a future version could find previously registered events via
@@ -167,13 +181,13 @@ Offsets must be 0–40320 minutes before midnight of the event day:
 
 | Preset | minutes |
 |---|---|
-| 알림 없음 | `overrides: []` |
-| 1일 전 오전 9시 *(default)* | `900` |
-| 3일 전 오전 9시 | `3780` |
-| 1주 전 오전 9시 | `9540` |
+| No reminder | `overrides: []` |
+| 1 day before, 9:00 AM *(default)* | `900` |
+| 3 days before, 9:00 AM | `3780` |
+| 1 week before, 9:00 AM | `9540` |
 
-"당일 오전 9시" is deliberately absent — it would be a negative offset, which the
-API rejects.
+"9:00 AM on the day itself" is deliberately absent — it would be a negative
+offset, which the API rejects.
 
 ## Google layer
 
@@ -266,24 +280,30 @@ Editing while in `done` returns to `ready`.
 ### Screen states
 
 **① idle** — Milestones are computed and listed on first paint, with `—` where the
-status badge will go, and a `Google 계정 연결` button. The app answers "when is our
-100일?" before asking for anything. This ordering also improves the odds of
-getting through the unverified-app interstitial: a user who already understands
+status badge will go, and a `Connect Google account` button. The app answers "when
+is our Day 100?" before asking for anything. This ordering also improves the odds
+of getting through the unverified-app interstitial: a user who already understands
 the app is far likelier to click through it.
 
-**② ready** — Badges fill in: 신규 / 등록됨 / 삭제됨 / 지난. The button states the
-actual work — `8개 등록 · 3개 업데이트` — so the outcome is known before the click.
-Past milestones are listed but unchecked.
+**② ready** — Badges fill in: `New` / `Already added` / `Deleted` / `Past`. The
+button states the actual work — `Add 8 · Update 3` — so the outcome is known before
+the click. Past milestones are listed but unchecked.
 
-**③ applying** — Per-item status, not one opaque spinner: 등록 / 업데이트 / 되살림 /
-전송 중 / 대기, with a progress bar.
+**③ applying** — Per-item status, not one opaque spinner: `Added` / `Updated` /
+`Restored` / `Sending…` / `Queued`, with a progress bar.
 
-**④ done** — A count, the per-item outcomes, and a `캘린더에서 보기` link that opens
-Google Calendar at the first created milestone's date.
+**④ done** — A count, the per-item outcomes, and a `View in Calendar ↗` link that
+opens Google Calendar at the first created milestone's date.
 
-**⑤ partial failure** — Successes and failures listed separately, with a recovery
-button that retries **only the failed items**. Retrying is safe because the IDs
-are deterministic; even re-running the whole set could not duplicate anything.
+**⑤ partial failure** — Successes and failures listed separately, with a
+`Reconnect and finish the remaining 3` button that retries **only the failed
+items**. Retrying is safe because the IDs are deterministic; even re-running the
+whole set could not duplicate anything.
+
+### Copy
+
+All user-facing strings are English literals defined next to the components that
+use them. There is no i18n layer, no message catalog, and no locale detection.
 
 ## Error handling
 
@@ -291,7 +311,7 @@ are deterministic; even re-running the whole set could not duplicate anything.
 |---|---|
 | Popup blocked | `requestAccessToken()` runs synchronously in the click handler; if it still fails, show instructions to allow popups. |
 | User denies scope | `hasGrantedAllScopes` is false → explain the permission is required and offer to retry. |
-| `401` mid-run | Stop scheduling new writes, keep completed results, offer `다시 연결하고 N개 이어서 등록`. |
+| `401` mid-run | Stop scheduling new writes, keep completed results, offer `Reconnect and finish the remaining N`. |
 | `403 rateLimitExceeded` / `429` | Exponential backoff with jitter, 3 attempts, then mark the item failed. |
 | `409` on insert | Fall back to `PATCH` (see Apply). |
 | `5xx` | Same backoff path as `429`. |
@@ -311,13 +331,14 @@ flow is interactive and cannot run headless.
 
 `domain/` — table-driven, and the bulk of the value:
 
-- Korean counting boundary: start 2026-01-01 → 100일 = 2026-04-09 (not 04-10).
-- 주년 is calendar-based: 1주년 = 2027-01-01, not `start + 365`.
-- Leap year: start 2024-02-29 → 1주년 = 2025-02-28.
+- Counting boundary: start 2026-01-01 → Day 100 = 2026-04-09 (not 04-10).
+- Year milestones are calendar-based: 1 Year = 2027-01-01, not `start + 365`.
+- Leap year: start 2024-02-29 → 1 Year = 2025-02-28.
 - Horizon: `years = 3` yields exactly 13 milestones; `years = 1` yields 4.
+- Year label pluralization: `1 Year`, `2 Years`.
 - `end.date` is `start.date + 1`.
 - ID determinism (same input → same output), charset regex, and stability against
-  changes to label / reminder / years.
+  changes to label / reminder / years / display strings.
 - Reminder preset → minutes mapping.
 
 `google/` — `fetch` mocked:
@@ -362,6 +383,10 @@ Recorded so they aren't rediscovered as bugs:
 
 - Discovering previously registered sets via `privateExtendedProperty` — the data
   is written from day one, the query is not built.
+- Korean (or any second) UI language. The domain is already language-independent:
+  milestone keys, event IDs, and all arithmetic are unaffected by labels, so this
+  would be a presentation-layer change plus a decision about existing events'
+  titles.
 - Choosing a non-primary or dedicated calendar (would need the broader `calendar`
   scope).
 - Custom milestone intervals beyond the 100-day step.
