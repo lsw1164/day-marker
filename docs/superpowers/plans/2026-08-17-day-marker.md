@@ -3238,8 +3238,9 @@ describe('useDayMarker — submitting', () => {
     expect(result.current.failedCount).toBeGreaterThan(0)
   })
 
-  it('reset() returns to a fresh ready state', async () => {
-    const { result } = renderHook(() => useDayMarker(deps()))
+  it('reset() re-probes rather than returning to a stale plan', async () => {
+    const api = stubApi()
+    const { result } = renderHook(() => useDayMarker(deps({ api })))
     act(() => result.current.setStartDate('2026-01-01'))
     await act(async () => {
       await result.current.connect()
@@ -3248,9 +3249,15 @@ describe('useDayMarker — submitting', () => {
     await act(async () => {
       await result.current.submit()
     })
+    const probesBeforeReset = (api.getEvent as ReturnType<typeof vi.fn>).mock.calls.length
     act(() => result.current.reset())
     await waitFor(() => expect(result.current.phase).toBe('ready'))
     expect(result.current.results).toEqual([])
+    // The plan in hand was stale after the write — every milestone must be
+    // re-read, not reused.
+    expect((api.getEvent as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
+      probesBeforeReset + 13,
+    )
   })
 })
 ```
@@ -3340,6 +3347,9 @@ export function useDayMarker({
 
   // Guards against a slow probe overwriting a newer one.
   const probeToken = useRef(0)
+  // Bumped to force a re-probe when the inputs have not changed but the calendar
+  // has — i.e. after we ourselves wrote to it. See `reset`.
+  const [probeNonce, setProbeNonce] = useState(0)
 
   useEffect(() => {
     if (!connected || !options || milestones.length === 0) return
@@ -3365,7 +3375,7 @@ export function useDayMarker({
       })()
     }, probeDelayMs)
     return () => clearTimeout(timer)
-  }, [connected, options, milestones, api, todayDate, probeDelayMs, auth])
+  }, [connected, options, milestones, api, todayDate, probeDelayMs, auth, probeNonce])
 
   const connect = useCallback(
     async (prompt: GisPrompt = '') => {
@@ -3435,7 +3445,12 @@ export function useDayMarker({
 
   const reset = useCallback(() => {
     setResults([])
-    setPhase(connected ? 'ready' : 'idle')
+    setPhase(connected ? 'probing' : 'idle')
+    // Force a fresh probe. We have just written to the calendar, so the plan in
+    // hand is stale: it still reports `new` for events that now exist. Returning
+    // to it would break the design's central claim — that the preview is the
+    // calendar's real state, not a prediction.
+    setProbeNonce((n) => n + 1)
   }, [connected])
 
   const counts = useMemo(() => countPlan(plan), [plan])
@@ -4397,17 +4412,24 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
 
   const busy = state.phase === 'applying' || state.phase === 'probing'
   const heading =
-    state.phase === 'probing'
-      ? COPY.probing
-      : state.phase === 'ready'
-        ? `${COPY.milestoneCount(state.plan.length)} · ${COPY.selectedCount(state.counts.selected)}`
-        : COPY.milestoneCount(state.milestones.length)
+    state.phase === 'applying'
+      ? // During a write the list shows only the selected subset, so a total
+        // milestone count here would contradict the rows underneath it.
+        COPY.progress(state.results.length, rows.length)
+      : state.phase === 'probing'
+        ? COPY.probing
+        : state.phase === 'ready'
+          ? `${COPY.milestoneCount(state.plan.length)} · ${COPY.selectedCount(state.counts.selected)}`
+          : COPY.milestoneCount(state.milestones.length)
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-5 px-4 pb-28 pt-6">
-      <header className="flex items-baseline justify-between">
-        <h1 className="text-lg font-semibold">{COPY.appName}</h1>
-        <span className="text-xs text-muted-foreground">
+      <header className="flex items-baseline justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold">{COPY.appName}</h1>
+          <p className="text-xs text-muted-foreground">{COPY.tagline}</p>
+        </div>
+        <span className="shrink-0 text-xs text-muted-foreground">
           {state.connected ? COPY.connected : COPY.notConnected}
         </span>
       </header>
