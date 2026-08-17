@@ -2981,6 +2981,9 @@ export const COPY = {
   progress: (done: number, total: number) => `${done} of ${total}`,
   queued: 'Queued',
 
+  // Decorative, but it lives here so the "no literals in components" rule stays
+  // absolute rather than requiring a judgement call about what counts as copy.
+  celebration: '🎉',
   doneHeadline: (n: number) => (n === 1 ? '1 milestone' : `${n} milestones`),
   doneSubhead: 'added to your calendar',
   andMore: (n: number) => `and ${n} more…`,
@@ -3412,8 +3415,14 @@ export function useDayMarker({
     // api and auth are intentionally absent — see the apiRef/authRef note above.
   }, [connected, options, milestones, todayDate, probeDelayMs, probeNonce])
 
+  /**
+   * Returns whether a usable token was obtained. Callers need that answer:
+   * `retryFailed` must not write with a dead token, and it cannot read the
+   * `connected` state to find out — that value is captured in this callback's
+   * closure and would be stale.
+   */
   const connect = useCallback(
-    async (prompt: GisPrompt = '') => {
+    async (prompt: GisPrompt = ''): Promise<boolean> => {
       try {
         // Called before any await so the popup survives the user gesture. It stays
         // inside the try and is always awaited, so a handler is attached — clear()
@@ -3423,17 +3432,19 @@ export function useDayMarker({
         await promise
         setError(null)
         setConnected(true)
+        return true
       } catch (e) {
         const message = e instanceof Error ? e.message : ''
         // A double-click: the popup the user already opened is still open, so
         // there is nothing to tell them and nothing to change.
-        if (message === SIGN_IN_IN_PROGRESS) return
+        if (message === SIGN_IN_IN_PROGRESS) return false
         // clear() abandoned this call. The path that called clear() is already
         // reporting its own error; overwriting it with this one would replace the
         // real cause with a symptom.
-        if (message === SIGN_IN_CANCELLED) return
+        if (message === SIGN_IN_CANCELLED) return false
         setError(describe(e))
         setConnected(false)
+        return false
       }
     },
     [],
@@ -3477,7 +3488,10 @@ export function useDayMarker({
   const retryFailed = useCallback(async () => {
     const failed = results.filter((r) => r.outcome === 'failed').map((r) => r.item)
     if (failed.length === 0) return
-    await connect('')
+    // Stop if the reconnect failed. `connect` has already reported why, and
+    // writing with a dead token would re-fail every item — replacing that
+    // explanation with a fresh pile of 401s and telling the user nothing.
+    if (!(await connect(''))) return
     await run(failed)
   }, [results, connect, run])
 
@@ -4238,6 +4252,49 @@ describe('ResultSummary — partial failure', () => {
     await userEvent.click(button)
     expect(onRetry).toHaveBeenCalled()
   })
+
+  it('renders exactly one alert even when both failures and an error are present', () => {
+    // The reachable case: a retry whose reconnect popup is cancelled. Two
+    // role="alert" elements would make every getByRole('alert') query ambiguous
+    // and give the user two competing error boxes.
+    render(
+      <ResultSummary
+        results={results}
+        error="Sign-in was cancelled"
+        onRetry={() => {}}
+        onReset={() => {}}
+      />,
+    )
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+  })
+
+  it('prefers the live error over a stored item error', () => {
+    render(
+      <ResultSummary
+        results={results}
+        error="Sign-in was cancelled"
+        onRetry={() => {}}
+        onReset={() => {}}
+      />,
+    )
+    // The newer cause explains the situation; 'boom' was recorded last attempt.
+    expect(screen.getByRole('alert')).toHaveTextContent('Sign-in was cancelled')
+    expect(screen.getByRole('alert')).not.toHaveTextContent('boom')
+  })
+
+  it('shows an error alert even when nothing failed', () => {
+    render(
+      <ResultSummary
+        results={[result(0, 'added')]}
+        error="Sign-in was cancelled"
+        onRetry={() => {}}
+        onReset={() => {}}
+      />,
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent('Sign-in was cancelled')
+    // The celebration block must not appear alongside an error.
+    expect(screen.queryByText('added to your calendar')).not.toBeInTheDocument()
+  })
 })
 ```
 
@@ -4327,6 +4384,47 @@ describe('App — errors', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/could not load/)
     expect(screen.getByRole('button', { name: /Connect Google account/ })).toBeDisabled()
   })
+
+  it('never shows two alerts when a retry reconnect fails', async () => {
+    // The whole path: write everything, have every item fail, then click
+    // "Reconnect and finish…" with a reconnect that fails for a reason the hook
+    // does not swallow. Previously App's error Alert and ResultSummary's failure
+    // Alert both rendered, leaving two role="alert" elements on screen.
+    const d = deps()
+    ;(d.api.insertEvent as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('insert exploded'),
+    )
+    render(<App deps={d} checkGisReady={gisReady} />)
+    enterStartDate('2026-01-01')
+    await userEvent.click(screen.getByRole('button', { name: /Connect Google account/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Add 12' }))
+    const retry = await screen.findByRole('button', { name: /Reconnect and finish/ })
+
+    ;(d.auth.connect as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('popup_closed'))
+    await userEvent.click(retry)
+
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+    expect(screen.getByRole('alert')).toHaveTextContent('popup_closed')
+  })
+
+  it('does not attempt writes when a retry reconnect fails', async () => {
+    const d = deps()
+    ;(d.api.insertEvent as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('insert exploded'),
+    )
+    render(<App deps={d} checkGisReady={gisReady} />)
+    enterStartDate('2026-01-01')
+    await userEvent.click(screen.getByRole('button', { name: /Connect Google account/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Add 12' }))
+    const retry = await screen.findByRole('button', { name: /Reconnect and finish/ })
+    const writesBefore = (d.api.insertEvent as ReturnType<typeof vi.fn>).mock.calls.length
+
+    ;(d.auth.connect as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('popup_closed'))
+    await userEvent.click(retry)
+
+    // Writing with a dead token would re-fail every item and bury the real cause.
+    expect((d.api.insertEvent as ReturnType<typeof vi.fn>).mock.calls.length).toBe(writesBefore)
+  })
 })
 ```
 
@@ -4362,11 +4460,18 @@ const PREVIEW_ROWS = 4
 
 export interface ResultSummaryProps {
   results: ItemResult[]
+  /**
+   * A live error from the hook — in practice a failed reconnect during a retry.
+   * It is rendered here rather than by `App` because `App`'s own error Alert plus
+   * this component's failure Alert would put two `role="alert"` elements on screen
+   * simultaneously. This screen owns its own reporting.
+   */
+  error?: string | null
   onRetry: () => void
   onReset: () => void
 }
 
-export function ResultSummary({ results, onRetry, onReset }: ResultSummaryProps) {
+export function ResultSummary({ results, error, onRetry, onReset }: ResultSummaryProps) {
   const failed = results.filter((r) => r.outcome === 'failed')
   const succeeded = results.filter((r) => r.outcome !== 'failed')
   const first = succeeded[0]?.item.milestone.date
@@ -4375,17 +4480,25 @@ export function ResultSummary({ results, onRetry, onReset }: ResultSummaryProps)
 
   return (
     <section className="space-y-4">
-      {failed.length > 0 ? (
+      {failed.length > 0 || error ? (
+        // Exactly one Alert on this screen, ever. `error` takes precedence over a
+        // stored item error because it is the newer and more actionable cause —
+        // a reconnect that just failed explains the situation better than a 401
+        // recorded during the previous attempt.
         <Alert variant="destructive">
           <AlertDescription>
-            <strong>{COPY.partialHeadline(succeeded.length, failed.length)}</strong>
-            <br />
-            {failed[0]?.error}
+            {failed.length > 0 && (
+              <>
+                <strong>{COPY.partialHeadline(succeeded.length, failed.length)}</strong>
+                <br />
+              </>
+            )}
+            {error ?? failed[0]?.error}
           </AlertDescription>
         </Alert>
       ) : (
         <div className="space-y-1 py-4 text-center">
-          <div className="text-2xl">🎉</div>
+          <div className="text-2xl">{COPY.celebration}</div>
           <div className="text-2xl font-bold">{COPY.doneHeadline(succeeded.length)}</div>
           <div className="text-muted-foreground">{COPY.doneSubhead}</div>
         </div>
@@ -4515,7 +4628,14 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
         </Alert>
       )}
 
-      {state.error && (
+      {/*
+        Gated on phase: in `done`, ResultSummary renders its own Alert, and an
+        ungated one here would put two role="alert" elements on screen at once —
+        reachable by clicking "Reconnect and finish the remaining N" and then
+        cancelling the popup. The error is passed down instead, so that screen
+        reports it in its single Alert.
+      */}
+      {state.phase !== 'done' && state.error && (
         <Alert variant="destructive">
           <AlertDescription>{state.error}</AlertDescription>
         </Alert>
@@ -4524,6 +4644,7 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
       {state.phase === 'done' ? (
         <ResultSummary
           results={state.results}
+          error={state.error}
           onRetry={() => void state.retryFailed()}
           onReset={state.reset}
         />
@@ -4546,7 +4667,12 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
           ) : (
             <>
               {state.phase === 'applying' && (
-                <Progress value={(state.results.length / Math.max(rows.length, 1)) * 100} />
+                // aria-label: the numeric context lives in the list heading, so
+                // without this a screen reader announces an unlabelled progressbar.
+                <Progress
+                  aria-label={COPY.applying}
+                  value={(state.results.length / Math.max(rows.length, 1)) * 100}
+                />
               )}
               <MilestoneList heading={heading} rows={rows} onToggle={state.toggle} />
             </>
