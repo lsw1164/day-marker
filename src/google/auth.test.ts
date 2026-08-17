@@ -4,6 +4,8 @@ import {
   CALENDAR_SCOPE,
   createAuth,
   MISSING_CLIENT_ID,
+  SIGN_IN_IN_PROGRESS,
+  whenGisReady,
   type GoogleIdentity,
 } from '@/google/auth'
 
@@ -37,7 +39,6 @@ function harness(): Harness {
           },
           hasGrantedAllScopes: (_r: unknown, ...scopes: string[]) =>
             scopes.every((s) => state.grantedScopes.includes(s)),
-          revoke: vi.fn(),
         },
       },
     } as unknown as GoogleIdentity,
@@ -91,6 +92,70 @@ describe('createAuth.connect', () => {
     const auth = createAuth('', () => h.gis)
     await expect(auth.connect()).rejects.toThrow(MISSING_CLIENT_ID)
     expect(h.requestAccessToken).not.toHaveBeenCalled()
+  })
+
+  it('refuses a second call while one is still pending, and opens no second popup', async () => {
+    // A double-click on the connect button. Without the guard the second call
+    // would overwrite the only reference to the first call's resolver, and the
+    // first promise would hang forever — never resolving, never rejecting.
+    const h = harness()
+    const auth = createAuth('client-1', () => h.gis)
+    const first = auth.connect()
+    await expect(auth.connect()).rejects.toThrow(SIGN_IN_IN_PROGRESS)
+    expect(h.requestAccessToken).toHaveBeenCalledTimes(1)
+    // The first call is still live and still settles normally.
+    h.fire({ access_token: 'tok', expires_in: 3600, scope: CALENDAR_SCOPE })
+    expect(await first).toBe('tok')
+  })
+
+  it('accepts a new call once the previous one has settled', async () => {
+    const h = harness()
+    const auth = createAuth('client-1', () => h.gis)
+    const first = auth.connect()
+    h.fire({ access_token: 'tok', expires_in: 3600, scope: CALENDAR_SCOPE })
+    await first
+    const second = auth.connect()
+    h.fire({ access_token: 'tok2', expires_in: 3600, scope: CALENDAR_SCOPE })
+    expect(await second).toBe('tok2')
+    expect(h.requestAccessToken).toHaveBeenCalledTimes(2)
+  })
+
+  it('clear() releases a pending slot that never got a callback', async () => {
+    const h = harness()
+    const auth = createAuth('client-1', () => h.gis)
+    void auth.connect() // never fired — simulates GIS going silent
+    auth.clear()
+    // Not bricked: a later attempt proceeds instead of rejecting forever.
+    const retry = auth.connect()
+    h.fire({ access_token: 'tok', expires_in: 3600, scope: CALENDAR_SCOPE })
+    expect(await retry).toBe('tok')
+  })
+})
+
+describe('whenGisReady', () => {
+  // This is the real default for App's readiness check, but every App test
+  // injects a stub, so without these tests it ships completely unexercised.
+
+  it('returns true immediately when the script is already there', async () => {
+    const sleep = vi.fn(async () => {})
+    const ready = await whenGisReady(1000, () => ({}) as GoogleIdentity, sleep)
+    expect(ready).toBe(true)
+    expect(sleep).not.toHaveBeenCalled()
+  })
+
+  it('polls until the script appears', async () => {
+    let polls = 0
+    const getGis = () => (++polls >= 3 ? ({} as GoogleIdentity) : undefined)
+    const sleep = vi.fn(async () => {})
+    expect(await whenGisReady(10_000, getGis, sleep)).toBe(true)
+    expect(sleep).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns false once the deadline passes', async () => {
+    // timeoutMs of 0 means the deadline is already reached on the first check.
+    const sleep = vi.fn(async () => {})
+    expect(await whenGisReady(0, () => undefined, sleep)).toBe(false)
+    expect(sleep).not.toHaveBeenCalled()
   })
 
   it('passes the prompt through to Google', () => {

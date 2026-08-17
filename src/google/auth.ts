@@ -7,6 +7,16 @@ export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events'
  */
 export const MISSING_CLIENT_ID = 'missing_client_id'
 
+/**
+ * Sentinel for "a sign-in popup is already open". Only one GIS call can be
+ * outstanding, because a single `settle` slot holds its resolver — so a second
+ * concurrent `connect()` is rejected rather than allowed to overwrite the slot
+ * and strand the first caller's promise forever. `useDayMarker` swallows this
+ * one: the popup the user already opened is still there, so there is nothing to
+ * tell them.
+ */
+export const SIGN_IN_IN_PROGRESS = 'sign_in_in_progress'
+
 /** '' re-authorizes silently when consent already exists. */
 export type GisPrompt = '' | 'consent' | 'select_account'
 
@@ -38,17 +48,21 @@ export interface GoogleIdentity {
         error_callback?: (error: unknown) => void
       }): TokenClient
       hasGrantedAllScopes(response: TokenResponse, ...scopes: string[]): boolean
-      revoke(token: string, done?: () => void): void
     }
   }
 }
 
 export interface Auth {
-  /** MUST be called synchronously inside a user gesture or the popup is blocked. */
+  /**
+   * MUST be called synchronously inside a user gesture or the popup is blocked.
+   * Rejects with `SIGN_IN_IN_PROGRESS` if a previous call has not settled yet —
+   * only one popup may be outstanding.
+   */
   connect(prompt?: GisPrompt): Promise<string>
+  /** The live token, or null once expired. Never persisted. */
   token(): string | null
+  /** Forgets the token and releases any stuck pending call. */
   clear(): void
-  revoke(): void
 }
 
 declare global {
@@ -135,6 +149,14 @@ export function createAuth(
       if (!gis) {
         return Promise.reject(new AuthError('Google sign-in script has not loaded'))
       }
+      // One popup at a time. `settle` holds the only reference to the pending
+      // resolver, so letting a second call overwrite it would abandon the first
+      // promise — it would never resolve and never reject, silently stranding
+      // whatever was awaiting it. GIS fires error_callback when a popup closes,
+      // so this clears itself; clear() is the escape hatch if it ever does not.
+      if (settle) {
+        return Promise.reject(new AuthError(SIGN_IN_IN_PROGRESS))
+      }
       const tokenClient = ensureClient(gis)
       const pending = new Promise<string>((resolve, reject) => {
         settle = { resolve, reject }
@@ -150,12 +172,9 @@ export function createAuth(
     clear() {
       accessToken = null
       expiresAt = 0
-    },
-    revoke() {
-      const gis = getGis()
-      if (gis && accessToken) gis.accounts.oauth2.revoke(accessToken)
-      accessToken = null
-      expiresAt = 0
+      // Also releases a pending slot, so a connect() that never got a callback
+      // cannot brick every later attempt.
+      settle = null
     },
   }
 }
