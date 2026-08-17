@@ -2515,6 +2515,12 @@ describe('createAuth.connect', () => {
     h.fire({ access_token: 'tok', expires_in: 3600, scope: CALENDAR_SCOPE })
     expect(await retry).toBe('tok')
   })
+
+  it('passes the prompt through to Google', () => {
+    const h = harness()
+    createAuth('client-1', () => h.gis).connect('select_account')
+    expect(h.requestAccessToken).toHaveBeenCalledWith({ prompt: 'select_account' })
+  })
 })
 
 describe('whenGisReady', () => {
@@ -2543,11 +2549,6 @@ describe('whenGisReady', () => {
     expect(sleep).not.toHaveBeenCalled()
   })
 
-  it('passes the prompt through to Google', () => {
-    const h = harness()
-    createAuth('client-1', () => h.gis).connect('select_account')
-    expect(h.requestAccessToken).toHaveBeenCalledWith({ prompt: 'select_account' })
-  })
 })
 
 describe('createAuth.token', () => {
