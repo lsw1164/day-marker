@@ -3333,6 +3333,22 @@ export function useDayMarker({
   const [results, setResults] = useState<ItemResult[]>([])
   const [error, setError] = useState<string | null>(null)
 
+  /**
+   * `api` and `auth` are singletons in practice, so they are read through refs
+   * rather than listed as effect dependencies.
+   *
+   * This is not stylistic. A caller that builds a fresh deps object on each
+   * render — trivially easy to do by inlining `useDayMarker({ auth, api })` —
+   * would otherwise retrigger the probe effect every render. The consequence is
+   * not a slow render: it is a loop issuing real Google Calendar requests as fast
+   * as React can re-render, burning the user's API quota against their own
+   * calendar. Keep these out of the dependency arrays.
+   */
+  const apiRef = useRef(api)
+  const authRef = useRef(auth)
+  apiRef.current = api
+  authRef.current = auth
+
   const start = isCalendarDate(startDate) ? startDate : null
 
   const milestones = useMemo(
@@ -3359,7 +3375,7 @@ export function useDayMarker({
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const next = await buildPlan(api, milestones, options, todayDate)
+          const next = await buildPlan(apiRef.current, milestones, options, todayDate)
           if (probeToken.current !== ticket) return
           setPlan(next)
           setResults([])
@@ -3370,18 +3386,22 @@ export function useDayMarker({
           setError(describe(e))
           setPhase('idle')
           setConnected(false)
-          auth.clear()
+          authRef.current.clear()
         }
       })()
     }, probeDelayMs)
     return () => clearTimeout(timer)
-  }, [connected, options, milestones, api, todayDate, probeDelayMs, auth, probeNonce])
+    // api and auth are intentionally absent — see the apiRef/authRef note above.
+  }, [connected, options, milestones, todayDate, probeDelayMs, probeNonce])
 
   const connect = useCallback(
     async (prompt: GisPrompt = '') => {
       try {
-        // Called before any await so the popup survives the user gesture.
-        const promise = auth.connect(prompt)
+        // Called before any await so the popup survives the user gesture. It stays
+        // inside the try and is always awaited, so a handler is attached — clear()
+        // rejects a pending call rather than dropping it, and a fire-and-forget
+        // call here would surface as an unhandled rejection.
+        const promise = authRef.current.connect(prompt)
         await promise
         setError(null)
         setConnected(true)
@@ -3398,7 +3418,7 @@ export function useDayMarker({
         setConnected(false)
       }
     },
-    [auth],
+    [],
   )
 
   const toggle = useCallback((key: string) => {
@@ -3416,7 +3436,7 @@ export function useDayMarker({
       setResults([])
       const collected: ItemResult[] = []
       const finished = await applyPlan(
-        api,
+        apiRef.current,
         items,
         options,
         (result) => {
@@ -3428,7 +3448,7 @@ export function useDayMarker({
       setResults(finished)
       setPhase('done')
     },
-    [api, options, retryDeps],
+    [options, retryDeps],
   )
 
   const submit = useCallback(
