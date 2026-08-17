@@ -17,6 +17,17 @@ export const MISSING_CLIENT_ID = 'missing_client_id'
  */
 export const SIGN_IN_IN_PROGRESS = 'sign_in_in_progress'
 
+/**
+ * Sentinel for "a pending sign-in was abandoned by `clear()`". `clear()` must
+ * REJECT a live pending call rather than silently drop it: dropping would remove
+ * the only reference to that call's resolver and strand it forever — the exact
+ * bug the `connect()` re-entrancy guard exists to prevent, reached through a
+ * different door. Rejecting is always safe; an awaiting caller gets an error
+ * instead of a hang. `useDayMarker` swallows this one, since `clear()` is only
+ * called on a path that is already reporting its own error.
+ */
+export const SIGN_IN_CANCELLED = 'sign_in_cancelled'
+
 /** '' re-authorizes silently when consent already exists. */
 export type GisPrompt = '' | 'consent' | 'select_account'
 
@@ -172,9 +183,14 @@ export function createAuth(
     clear() {
       accessToken = null
       expiresAt = 0
-      // Also releases a pending slot, so a connect() that never got a callback
-      // cannot brick every later attempt.
+      // Releases a pending slot so a connect() that never got a callback cannot
+      // brick every later attempt — but REJECTS it rather than dropping it.
+      // Dropping would remove the only reference to a live call's resolver and
+      // strand it forever, which is the very bug the re-entrancy guard above
+      // prevents. Rejecting turns a hang into an error, which is always safe.
+      const pending = settle
       settle = null
+      pending?.reject(new AuthError(SIGN_IN_CANCELLED))
     },
   }
 }

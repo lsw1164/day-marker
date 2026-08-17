@@ -4,6 +4,7 @@ import {
   CALENDAR_SCOPE,
   createAuth,
   MISSING_CLIENT_ID,
+  SIGN_IN_CANCELLED,
   SIGN_IN_IN_PROGRESS,
   whenGisReady,
   type GoogleIdentity,
@@ -123,12 +124,31 @@ describe('createAuth.connect', () => {
   it('clear() releases a pending slot that never got a callback', async () => {
     const h = harness()
     const auth = createAuth('client-1', () => h.gis)
-    void auth.connect() // never fired — simulates GIS going silent
+    const abandoned = auth.connect() // never fired — simulates GIS going silent
     auth.clear()
-    // Not bricked: a later attempt proceeds instead of rejecting forever.
+    // Rejected, not dropped: dropping would strand this promise forever, which
+    // is the same defect the re-entrancy guard exists to prevent.
+    await expect(abandoned).rejects.toThrow(SIGN_IN_CANCELLED)
+    // And not bricked: a later attempt proceeds instead of rejecting forever.
     const retry = auth.connect()
     h.fire({ access_token: 'tok', expires_in: 3600, scope: CALENDAR_SCOPE })
     expect(await retry).toBe('tok')
+  })
+
+  it('clear() rejects a genuinely in-flight call rather than stranding it', async () => {
+    // The narrower hazard: clear() racing a live popup, not a silent one. A late
+    // GIS callback then finds an empty slot and returns without settling, so the
+    // caller would hang if clear() had merely nulled the slot.
+    const h = harness()
+    const auth = createAuth('client-1', () => h.gis)
+    const inFlight = auth.connect()
+    auth.clear()
+    await expect(inFlight).rejects.toThrow(SIGN_IN_CANCELLED)
+    // A callback arriving after the clear is ignored and must not throw.
+    expect(() =>
+      h.fire({ access_token: 'late', expires_in: 3600, scope: CALENDAR_SCOPE }),
+    ).not.toThrow()
+    expect(auth.token()).toBeNull()
   })
 
   it('passes the prompt through to Google', () => {
