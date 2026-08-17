@@ -2371,7 +2371,9 @@ Wraps the browser token client. The one hard rule: `requestAccessToken()` runs s
     `VITE_GOOGLE_CLIENT_ID`; `useDayMarker` maps it to `COPY.missingClientId` so the copy
     stays in `ui/` and `google/` never imports from `ui/`
   - `class AuthError extends Error`
-  - `interface Auth { connect(prompt?: GisPrompt): Promise<string>; token(): string | null; clear(): void; revoke(): void }`
+  - `interface Auth { connect(prompt?: GisPrompt): Promise<string>; token(): string | null; clear(): void }`
+  - `SIGN_IN_IN_PROGRESS = 'sign_in_in_progress'` — sentinel rejecting a second `connect()`
+    while one is still pending, so the first caller's promise is never stranded
   - `type GisPrompt = '' | 'consent' | 'select_account'`
   - `createAuth(clientId: string, getGis?: () => GoogleIdentity | undefined, now?: () => number): Auth`
   - `whenGisReady(timeoutMs?: number, getGis?, sleep?): Promise<boolean>`
@@ -2387,6 +2389,8 @@ import {
   CALENDAR_SCOPE,
   createAuth,
   MISSING_CLIENT_ID,
+  SIGN_IN_IN_PROGRESS,
+  whenGisReady,
   type GoogleIdentity,
 } from '@/google/auth'
 
@@ -2420,7 +2424,6 @@ function harness(): Harness {
           },
           hasGrantedAllScopes: (_r: unknown, ...scopes: string[]) =>
             scopes.every((s) => state.grantedScopes.includes(s)),
-          revoke: vi.fn(),
         },
       },
     } as unknown as GoogleIdentity,
@@ -2474,6 +2477,70 @@ describe('createAuth.connect', () => {
     const auth = createAuth('', () => h.gis)
     await expect(auth.connect()).rejects.toThrow(MISSING_CLIENT_ID)
     expect(h.requestAccessToken).not.toHaveBeenCalled()
+  })
+
+  it('refuses a second call while one is still pending, and opens no second popup', async () => {
+    // A double-click on the connect button. Without the guard the second call
+    // would overwrite the only reference to the first call's resolver, and the
+    // first promise would hang forever — never resolving, never rejecting.
+    const h = harness()
+    const auth = createAuth('client-1', () => h.gis)
+    const first = auth.connect()
+    await expect(auth.connect()).rejects.toThrow(SIGN_IN_IN_PROGRESS)
+    expect(h.requestAccessToken).toHaveBeenCalledTimes(1)
+    // The first call is still live and still settles normally.
+    h.fire({ access_token: 'tok', expires_in: 3600, scope: CALENDAR_SCOPE })
+    expect(await first).toBe('tok')
+  })
+
+  it('accepts a new call once the previous one has settled', async () => {
+    const h = harness()
+    const auth = createAuth('client-1', () => h.gis)
+    const first = auth.connect()
+    h.fire({ access_token: 'tok', expires_in: 3600, scope: CALENDAR_SCOPE })
+    await first
+    const second = auth.connect()
+    h.fire({ access_token: 'tok2', expires_in: 3600, scope: CALENDAR_SCOPE })
+    expect(await second).toBe('tok2')
+    expect(h.requestAccessToken).toHaveBeenCalledTimes(2)
+  })
+
+  it('clear() releases a pending slot that never got a callback', async () => {
+    const h = harness()
+    const auth = createAuth('client-1', () => h.gis)
+    void auth.connect() // never fired — simulates GIS going silent
+    auth.clear()
+    // Not bricked: a later attempt proceeds instead of rejecting forever.
+    const retry = auth.connect()
+    h.fire({ access_token: 'tok', expires_in: 3600, scope: CALENDAR_SCOPE })
+    expect(await retry).toBe('tok')
+  })
+})
+
+describe('whenGisReady', () => {
+  // This is the real default for App's readiness check, but every App test
+  // injects a stub, so without these tests it ships completely unexercised.
+
+  it('returns true immediately when the script is already there', async () => {
+    const sleep = vi.fn(async () => {})
+    const ready = await whenGisReady(1000, () => ({}) as GoogleIdentity, sleep)
+    expect(ready).toBe(true)
+    expect(sleep).not.toHaveBeenCalled()
+  })
+
+  it('polls until the script appears', async () => {
+    let polls = 0
+    const getGis = () => (++polls >= 3 ? ({} as GoogleIdentity) : undefined)
+    const sleep = vi.fn(async () => {})
+    expect(await whenGisReady(10_000, getGis, sleep)).toBe(true)
+    expect(sleep).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns false once the deadline passes', async () => {
+    // timeoutMs of 0 means the deadline is already reached on the first check.
+    const sleep = vi.fn(async () => {})
+    expect(await whenGisReady(0, () => undefined, sleep)).toBe(false)
+    expect(sleep).not.toHaveBeenCalled()
   })
 
   it('passes the prompt through to Google', () => {
@@ -2539,6 +2606,16 @@ export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events'
  */
 export const MISSING_CLIENT_ID = 'missing_client_id'
 
+/**
+ * Sentinel for "a sign-in popup is already open". Only one GIS call can be
+ * outstanding, because a single `settle` slot holds its resolver — so a second
+ * concurrent `connect()` is rejected rather than allowed to overwrite the slot
+ * and strand the first caller's promise forever. `useDayMarker` swallows this
+ * one: the popup the user already opened is still there, so there is nothing to
+ * tell them.
+ */
+export const SIGN_IN_IN_PROGRESS = 'sign_in_in_progress'
+
 /** '' re-authorizes silently when consent already exists. */
 export type GisPrompt = '' | 'consent' | 'select_account'
 
@@ -2570,17 +2647,21 @@ export interface GoogleIdentity {
         error_callback?: (error: unknown) => void
       }): TokenClient
       hasGrantedAllScopes(response: TokenResponse, ...scopes: string[]): boolean
-      revoke(token: string, done?: () => void): void
     }
   }
 }
 
 export interface Auth {
-  /** MUST be called synchronously inside a user gesture or the popup is blocked. */
+  /**
+   * MUST be called synchronously inside a user gesture or the popup is blocked.
+   * Rejects with `SIGN_IN_IN_PROGRESS` if a previous call has not settled yet —
+   * only one popup may be outstanding.
+   */
   connect(prompt?: GisPrompt): Promise<string>
+  /** The live token, or null once expired. Never persisted. */
   token(): string | null
+  /** Forgets the token and releases any stuck pending call. */
   clear(): void
-  revoke(): void
 }
 
 declare global {
@@ -2667,6 +2748,14 @@ export function createAuth(
       if (!gis) {
         return Promise.reject(new AuthError('Google sign-in script has not loaded'))
       }
+      // One popup at a time. `settle` holds the only reference to the pending
+      // resolver, so letting a second call overwrite it would abandon the first
+      // promise — it would never resolve and never reject, silently stranding
+      // whatever was awaiting it. GIS fires error_callback when a popup closes,
+      // so this clears itself; clear() is the escape hatch if it ever does not.
+      if (settle) {
+        return Promise.reject(new AuthError(SIGN_IN_IN_PROGRESS))
+      }
       const tokenClient = ensureClient(gis)
       const pending = new Promise<string>((resolve, reject) => {
         settle = { resolve, reject }
@@ -2682,12 +2771,9 @@ export function createAuth(
     clear() {
       accessToken = null
       expiresAt = 0
-    },
-    revoke() {
-      const gis = getGis()
-      if (gis && accessToken) gis.accounts.oauth2.revoke(accessToken)
-      accessToken = null
-      expiresAt = 0
+      // Also releases a pending slot, so a connect() that never got a callback
+      // cannot brick every later attempt.
+      settle = null
     },
   }
 }
@@ -2933,7 +3019,6 @@ function stubAuth(overrides: Partial<Auth> = {}): Auth {
     connect: vi.fn(async () => 'tok'),
     token: vi.fn(() => 'tok'),
     clear: vi.fn(),
-    revoke: vi.fn(),
     ...overrides,
   }
 }
@@ -3145,7 +3230,12 @@ import type { EventOptions } from '@/domain/eventPayload'
 import { computeMilestones, DEFAULT_YEARS } from '@/domain/milestones'
 import { DEFAULT_REMINDER, type ReminderPreset } from '@/domain/reminders'
 import { applyPlan, type ItemResult } from '@/google/apply'
-import { MISSING_CLIENT_ID, type Auth, type GisPrompt } from '@/google/auth'
+import {
+  MISSING_CLIENT_ID,
+  SIGN_IN_IN_PROGRESS,
+  type Auth,
+  type GisPrompt,
+} from '@/google/auth'
 import type { CalendarApi } from '@/google/calendarApi'
 import { buildPlan, type PlanItem } from '@/google/plan'
 import type { RetryDeps } from '@/lib/backoff'
@@ -3246,6 +3336,9 @@ export function useDayMarker({
         setError(null)
         setConnected(true)
       } catch (e) {
+        // A double-click: the popup the user already opened is still open, so
+        // there is nothing to tell them and nothing to change.
+        if (e instanceof Error && e.message === SIGN_IN_IN_PROGRESS) return
         setError(describe(e))
         setConnected(false)
       }
@@ -4036,7 +4129,6 @@ function deps(over: Partial<DayMarkerDeps> = {}): DayMarkerDeps {
     connect: vi.fn(async () => 'tok'),
     token: vi.fn(() => 'tok'),
     clear: vi.fn(),
-    revoke: vi.fn(),
   }
   const api: CalendarApi = {
     getEvent: vi.fn(async () => null),
