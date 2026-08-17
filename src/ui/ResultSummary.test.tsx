@@ -67,21 +67,6 @@ describe('ResultSummary — partial failure', () => {
     expect(onRetry).toHaveBeenCalled()
   })
 
-  it('renders exactly one alert even when both failures and an error are present', () => {
-    // The reachable case: a retry whose reconnect popup is cancelled. Two
-    // role="alert" elements would make every getByRole('alert') query ambiguous
-    // and give the user two competing error boxes.
-    render(
-      <ResultSummary
-        results={results}
-        error="Sign-in was cancelled"
-        onRetry={() => {}}
-        onReset={() => {}}
-      />,
-    )
-    expect(screen.getAllByRole('alert')).toHaveLength(1)
-  })
-
   it('prefers the live error over a stored item error', () => {
     render(
       <ResultSummary
@@ -108,5 +93,35 @@ describe('ResultSummary — partial failure', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Sign-in was cancelled')
     // The celebration block must not appear alongside an error.
     expect(screen.queryByText('added to your calendar')).not.toBeInTheDocument()
+  })
+})
+
+describe('ResultSummary — nothing needed writing', () => {
+  it('does not claim events were added when every item was unchanged', () => {
+    // `succeeded` includes 'skipped', so this used to read
+    // "🎉 2 milestones / added to your calendar" for a submission that wrote
+    // nothing at all.
+    render(
+      <ResultSummary
+        results={[result(0, 'skipped'), result(1, 'skipped')]}
+        onRetry={() => {}}
+        onReset={() => {}}
+      />,
+    )
+    expect(screen.getByText('2 milestones')).toBeInTheDocument()
+    expect(screen.getByText('already on your calendar')).toBeInTheDocument()
+    expect(screen.queryByText('added to your calendar')).not.toBeInTheDocument()
+  })
+
+  it('still reports "added" when at least one item was written', () => {
+    render(
+      <ResultSummary
+        results={[result(0, 'skipped'), result(1, 'added')]}
+        onRetry={() => {}}
+        onReset={() => {}}
+      />,
+    )
+    expect(screen.getByText('added to your calendar')).toBeInTheDocument()
+    expect(screen.queryByText('already on your calendar')).not.toBeInTheDocument()
   })
 })

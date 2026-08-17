@@ -47,6 +47,10 @@ export const COPY = {
   celebration: '🎉',
   doneHeadline: (n: number) => (n === 1 ? '1 milestone' : `${n} milestones`),
   doneSubhead: 'added to your calendar',
+  // Used when every result is 'skipped': nothing was written, because every
+  // milestone was already correct. Reporting those as "added" would be a claim
+  // about the user's calendar that the app knows to be false.
+  unchangedSubhead: 'already on your calendar',
   andMore: (n: number) => `and ${n} more…`,
   viewInCalendar: 'View in Calendar ↗',
   startOver: 'Start over',

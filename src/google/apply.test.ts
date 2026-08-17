@@ -171,6 +171,22 @@ describe('applyPlan — halting on auth loss', () => {
   })
 })
 
+describe('applyPlan — a throwing progress callback', () => {
+  it('rejects instead of resolving with undefined entries', async () => {
+    // onProgress runs outside the try in the halted branch and again inside the
+    // catch, so a throwing callback really does reject the slot. The old
+    // unconditional `as PromiseFulfilledResult<ItemResult>` turned that into an
+    // array of `undefined` — straight into React state, crashing the result
+    // screen on `result.item.eventId`.
+    const onProgress = () => {
+      throw new Error('render exploded')
+    }
+    await expect(
+      applyPlan(stubApi(), [item(0, 'new')], OPTIONS, onProgress, RETRY),
+    ).rejects.toThrow('render exploded')
+  })
+})
+
 describe('applyPlan — progress', () => {
   it('reports every item exactly once, as it lands', async () => {
     const seen: ItemResult[] = []

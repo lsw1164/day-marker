@@ -19,7 +19,15 @@ export interface AppProps {
 
 export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
   const state = useDayMarker(deps)
-  const [gisReady, setGisReady] = useState(true)
+  /**
+   * Tri-state, not a boolean. `whenGisReady` polls for up to ten seconds, and a
+   * boolean has to pick a lie for that window: `true` enables Connect while the
+   * script is still absent, so an ad-blocked user gets AuthError('Google sign-in
+   * script has not loaded') verbatim in the alert and then, ten seconds later, a
+   * second alert with the real copy. `null` means "not known yet": no alert, and
+   * Connect stays disabled until the answer arrives.
+   */
+  const [gisReady, setGisReady] = useState<boolean | null>(null)
 
   useEffect(() => {
     let live = true
@@ -40,7 +48,11 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
     todayDate,
   })
 
-  const busy = state.phase === 'applying' || state.phase === 'probing'
+  // `reprobePending` covers the debounce window before `probing` begins. The plan
+  // on screen is deliberately still visible there, but it no longer matches the
+  // inputs, so submitting it would write the wrong thing — or skip a rename.
+  const busy =
+    state.phase === 'applying' || state.phase === 'probing' || state.reprobePending
   const heading =
     state.phase === 'applying'
       ? // During a write the list shows only the selected subset, so a total
@@ -70,7 +82,7 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
         This comment belongs here, in children position. A JSX comment placed
         inside one of the parenthesised && expressions below is a syntax error.
       */}
-      {!gisReady && (
+      {gisReady === false && (
         <Alert variant="destructive">
           <AlertDescription>{COPY.scriptBlocked}</AlertDescription>
         </Alert>
@@ -140,7 +152,10 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
                 <Button
                   className="w-full"
                   variant="outline"
-                  disabled={!gisReady}
+                  // Only an affirmative `true` enables it: while readiness is
+                  // still unknown a click would reach GIS before the script has
+                  // loaded and surface an internal message.
+                  disabled={gisReady !== true}
                   onClick={() => void state.connect()}
                 >
                   {COPY.connect}

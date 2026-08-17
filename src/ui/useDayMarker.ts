@@ -89,6 +89,25 @@ export function useDayMarker({
     [start, label, reminder],
   )
 
+  /**
+   * True from the moment the inputs change until the probe they triggered
+   * settles: the plan in hand no longer describes the current inputs.
+   *
+   * This is the half of `probing` that had to stay synchronous. `probing` also
+   * blanks every status badge, which is why it now waits for the debounce — but
+   * "the preview is stale" must be known immediately, because the action button
+   * reads `needsUpdate` off that stale plan. Without this flag, editing the
+   * Label and submitting inside the 400 ms window skips the rename: the item is
+   * still `exists`/`needsUpdate: false` from the previous title, so `applyOne`
+   * returns 'skipped' and the event silently keeps its old summary.
+   *
+   * It is only ever set by an effect run that schedules a probe, and cleared by
+   * that probe's own ticket. Any state where it is stuck true is a state where
+   * the plan does not match the inputs, so a disabled button is the honest
+   * answer there too.
+   */
+  const [reprobePending, setReprobePending] = useState(false)
+
   // Guards against a slow probe overwriting a newer one.
   const probeToken = useRef(0)
   // Bumped to force a re-probe when the inputs have not changed but the calendar
@@ -99,8 +118,16 @@ export function useDayMarker({
     if (!connected || !options || milestones.length === 0) return
     const ticket = probeToken.current + 1
     probeToken.current = ticket
-    setPhase('probing')
+    // Synchronous, where setPhase('probing') used to be: this is the instant the
+    // plan on screen stops matching the inputs.
+    setReprobePending(true)
     const timer = setTimeout(() => {
+      // Inside the timeout, not before it. `probing` renders like `idle` — every
+      // status badge becomes '—' and the action button goes dead — so setting it
+      // synchronously blanked the entire preview on every keystroke in the Label
+      // field and only restored it 400 ms after the user stopped typing. Keeping
+      // it here leaves the previous plan on screen while a re-probe is pending.
+      setPhase('probing')
       void (async () => {
         try {
           const next = await buildPlan(apiRef.current, milestones, options, todayDate)
@@ -108,10 +135,14 @@ export function useDayMarker({
           setPlan(next)
           setResults([])
           setError(null)
+          // Cleared inside the ticket guard on both settle paths, so a probe that
+          // has already been superseded cannot report a newer one as settled.
+          setReprobePending(false)
           setPhase('ready')
         } catch (e) {
           if (probeToken.current !== ticket) return
           setError(describe(e))
+          setReprobePending(false)
           setPhase('idle')
           setConnected(false)
           authRef.current.clear()
@@ -165,23 +196,42 @@ export function useDayMarker({
     )
   }, [])
 
+  /**
+   * `previous` carries the results of an earlier pass that this run must not
+   * discard — a retry writes only the failed items, but the report still has to
+   * account for the ones that already succeeded. It seeds the progress
+   * accumulator as well as the final state, so the rows and the "N of M"
+   * heading stay correct while the retry is in flight instead of collapsing to
+   * "0 of 12" and reverting added rows to "Queued".
+   */
   const run = useCallback(
-    async (items: PlanItem[]) => {
+    async (items: PlanItem[], previous: ItemResult[] = []) => {
       if (!options || items.length === 0) return
       setPhase('applying')
-      setResults([])
-      const collected: ItemResult[] = []
-      const finished = await applyPlan(
-        apiRef.current,
-        items,
-        options,
-        (result) => {
-          collected.push(result)
-          setResults([...collected])
-        },
-        retryDeps,
-      )
-      setResults(finished)
+      setResults(previous)
+      const collected: ItemResult[] = [...previous]
+      try {
+        const finished = await applyPlan(
+          apiRef.current,
+          items,
+          options,
+          (result) => {
+            collected.push(result)
+            setResults([...collected])
+          },
+          retryDeps,
+        )
+        setResults([...previous, ...finished])
+      } catch (e) {
+        // applyPlan reports per-item failures in its return value, so the only
+        // way it rejects is the progress callback above throwing. Unreachable
+        // today — `collected.push` and `setResults` do not throw — but the path
+        // exists, and uncaught it would surface as an unhandled rejection and
+        // strand the UI in 'applying' with a spinner that never finishes.
+        // `collected` is the most complete record available, so report that.
+        setError(describe(e))
+        setResults([...collected])
+      }
       setPhase('done')
     },
     [options, retryDeps],
@@ -193,13 +243,19 @@ export function useDayMarker({
   )
 
   const retryFailed = useCallback(async () => {
-    const failed = results.filter((r) => r.outcome === 'failed').map((r) => r.item)
+    const failed = results.filter((r) => r.outcome === 'failed')
     if (failed.length === 0) return
+    // Everything that did not fail is already in the user's calendar. Hand it to
+    // `run` so the retry adds to that record rather than replacing it.
+    const kept = results.filter((r) => r.outcome !== 'failed')
     // Stop if the reconnect failed. `connect` has already reported why, and
     // writing with a dead token would re-fail every item — replacing that
     // explanation with a fresh pile of 401s and telling the user nothing.
     if (!(await connect(''))) return
-    await run(failed)
+    await run(
+      failed.map((r) => r.item),
+      kept,
+    )
   }, [results, connect, run])
 
   const reset = useCallback(() => {
@@ -217,6 +273,7 @@ export function useDayMarker({
 
   return {
     phase,
+    reprobePending,
     startDate,
     label,
     years,

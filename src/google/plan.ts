@@ -35,7 +35,12 @@ export async function buildPlan(
 ): Promise<PlanItem[]> {
   const wantedMinutes = REMINDER_MINUTES[options.reminder]
 
-  const settled = await mapWithLimit(milestones, PROBE_CONCURRENCY, async (milestone) => {
+  // The `Promise<PlanItem>` annotation is load-bearing, and it needs a named
+  // function to sit on: inline in the mapWithLimit call, `status: 'new'` widened
+  // to `string` and the cast that used to end this function erased the mismatch,
+  // so a `status: 'nwe'` typo compiled clean and shipped a PlanItem that no
+  // branch of `applyOne` recognises.
+  const probe = async (milestone: Milestone): Promise<PlanItem> => {
     const eventId = await eventIdFor(options.start, milestone.key)
     const existing = await api.getEvent(eventId)
     const past = milestone.date < todayDate
@@ -50,11 +55,15 @@ export async function buildPlan(
       existing.summary !== titleFor(milestone, options.label) ||
       existingMinutes(existing) !== wantedMinutes
     return { milestone, eventId, status: 'exists', past, selected: !past, needsUpdate }
+  }
+
+  const settled = await mapWithLimit(milestones, PROBE_CONCURRENCY, probe)
+
+  // A probe failure means we cannot describe the calendar honestly, so surface
+  // it. Narrowing per slot rather than asserting `PromiseFulfilledResult`: the
+  // assertion would happily read `.value` off a rejected slot as a PlanItem.
+  return settled.map((r) => {
+    if (r.status === 'rejected') throw r.reason
+    return r.value
   })
-
-  // A probe failure means we cannot describe the calendar honestly, so surface it.
-  const failure = settled.find((r) => r.status === 'rejected')
-  if (failure && failure.status === 'rejected') throw failure.reason
-
-  return settled.map((r) => (r as PromiseFulfilledResult<PlanItem>).value)
 }

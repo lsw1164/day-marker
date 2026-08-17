@@ -33,11 +33,25 @@ async function readError(response: Response): Promise<{ reason: string; detail: 
   }
 }
 
+/**
+ * Every reason Google returns on a 403 that means "too many requests" rather
+ * than "you may not do this". All four must map to RateLimited: classifying one
+ * as Unauthorized makes `isRetryable` refuse it *and* trips `applyPlan`'s
+ * `halted` flag, so a transient quota blip would report the connection as
+ * expired and cancel every write still queued behind it.
+ */
+const QUOTA_REASONS: ReadonlySet<string> = new Set([
+  'rateLimitExceeded',
+  'userRateLimitExceeded',
+  'quotaExceeded',
+  'dailyLimitExceeded',
+])
+
 function toError(status: number, reason: string, detail: string): ApiError {
   if (status === 401) return new Unauthorized(status, reason, detail)
   if (status === 403) {
     // 403 is overloaded: quota problems are retryable, permission problems are not.
-    return reason === 'rateLimitExceeded' || reason === 'userRateLimitExceeded'
+    return QUOTA_REASONS.has(reason)
       ? new RateLimited(status, reason, detail)
       : new Unauthorized(status, reason, detail)
   }

@@ -72,7 +72,12 @@ describe('error mapping', () => {
   it.each([
     [401, 'authError', Unauthorized],
     [403, 'insufficientPermissions', Unauthorized],
+    // All four quota reasons Google uses on 403. Misclassifying any of them as
+    // Unauthorized both blocks the retry and halts every queued write.
     [403, 'rateLimitExceeded', RateLimited],
+    [403, 'userRateLimitExceeded', RateLimited],
+    [403, 'quotaExceeded', RateLimited],
+    [403, 'dailyLimitExceeded', RateLimited],
     [429, 'rateLimitExceeded', RateLimited],
     [409, 'duplicate', Conflict],
     [500, 'backendError', ServerError],

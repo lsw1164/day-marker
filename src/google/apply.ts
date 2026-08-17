@@ -40,6 +40,14 @@ async function applyOne(
     return 'updated'
   }
 
+  if (item.status !== 'new') {
+    // Exhaustiveness check: `item.status` is `never` here today. A fourth
+    // PlanStatus would fail this assignment at compile time rather than silently
+    // inheriting the insert below, which is almost certainly the wrong write.
+    const unhandled: never = item.status
+    throw new Error(`Unhandled plan status: ${String(unhandled)}`)
+  }
+
   try {
     await api.insertEvent(payload)
     return 'added'
@@ -84,5 +92,14 @@ export async function applyPlan(
     }
   })
 
-  return settled.map((r) => (r as PromiseFulfilledResult<ItemResult>).value)
+  // The per-item callback is *nearly* total, but not quite: `onProgress` runs
+  // outside the try in the halted branch and again inside the catch, so a
+  // throwing progress callback rejects the slot. An unconditional
+  // `as PromiseFulfilledResult<ItemResult>` would then push `undefined` into
+  // React state and crash the result screen. Surface the rejection instead,
+  // exactly as `buildPlan` does for a failed probe.
+  return settled.map((r) => {
+    if (r.status === 'rejected') throw r.reason
+    return r.value
+  })
 }

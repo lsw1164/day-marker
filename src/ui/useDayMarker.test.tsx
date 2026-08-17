@@ -133,6 +133,45 @@ describe('useDayMarker — connecting and probing', () => {
     expect(result.current.error).toBe(COPY.missingClientId)
   })
 
+  it('clears the pending flag and drops the connection when the probe fails', async () => {
+    const api = stubApi()
+    ;(api.getEvent as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Unauthorized(401, 'authError', ''),
+    )
+    const auth = stubAuth()
+    const { result } = renderHook(() => useDayMarker(deps({ api, auth })))
+    act(() => result.current.setStartDate('2026-01-01'))
+    await act(async () => {
+      await result.current.connect()
+    })
+    await waitFor(() => expect(result.current.error).toContain('401'))
+    expect(result.current.phase).toBe('idle')
+    expect(result.current.connected).toBe(false)
+    // The flag belongs to the probe that set it; leaving it set on the failure
+    // path would outlive its owner.
+    expect(result.current.reprobePending).toBe(false)
+    expect(auth.clear).toHaveBeenCalled()
+  })
+
+  it('marks a re-probe pending as soon as the inputs change', async () => {
+    const { result } = renderHook(() => useDayMarker(deps()))
+    act(() => result.current.setStartDate('2026-01-01'))
+    await act(async () => {
+      await result.current.connect()
+    })
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+    expect(result.current.reprobePending).toBe(false)
+
+    // Synchronously true: the plan in hand was computed against the old label,
+    // so nothing may be submitted until the fresh probe lands.
+    act(() => result.current.setLabel('Us'))
+    expect(result.current.reprobePending).toBe(true)
+    // The plan itself is deliberately still there — only the action is blocked.
+    expect(result.current.plan).toHaveLength(13)
+
+    await waitFor(() => expect(result.current.reprobePending).toBe(false))
+  })
+
   it('re-probes when the reminder changes', async () => {
     const api = stubApi()
     const { result } = renderHook(() => useDayMarker(deps({ api })))

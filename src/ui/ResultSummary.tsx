@@ -25,6 +25,9 @@ export function ResultSummary({ results, error, onRetry, onReset }: ResultSummar
   const failed = results.filter((r) => r.outcome === 'failed')
   const succeeded = results.filter((r) => r.outcome !== 'failed')
   const first = succeeded[0]?.item.milestone.date
+  // Nothing was written: every milestone was already correct on the calendar.
+  const allUnchanged =
+    succeeded.length > 0 && succeeded.every((r) => r.outcome === 'skipped')
   const shown = results.slice(0, PREVIEW_ROWS)
   const hidden = results.length - shown.length
 
@@ -50,7 +53,9 @@ export function ResultSummary({ results, error, onRetry, onReset }: ResultSummar
         <div className="space-y-1 py-4 text-center">
           <div className="text-2xl">{COPY.celebration}</div>
           <div className="text-2xl font-bold">{COPY.doneHeadline(succeeded.length)}</div>
-          <div className="text-muted-foreground">{COPY.doneSubhead}</div>
+          <div className="text-muted-foreground">
+            {allUnchanged ? COPY.unchangedSubhead : COPY.doneSubhead}
+          </div>
         </div>
       )}
 

@@ -21,6 +21,10 @@ not 365-day multiples.
 
 ## Setup
 
+Requires **Node 20+** and npm — `package.json` declares it under `engines`, and an
+older Node is the most common first-run failure. Run every command from the repo
+root.
+
 1. In the [Google Cloud Console](https://console.cloud.google.com): enable the
    **Google Calendar API**, configure an **External** OAuth consent screen with the
    scope `https://www.googleapis.com/auth/calendar.events`, add your own account
@@ -47,7 +51,7 @@ assessment.
 | Command | What it does |
 |---|---|
 | `npm run dev` | Dev server on <http://localhost:5173> |
-| `npm test` | Full unit suite (194 tests) |
+| `npm test` | Full unit suite |
 | `npm run test:watch` | Watch mode |
 | `npm run typecheck` | Types only |
 | `npm run build` | Production build to `dist/` |
@@ -71,12 +75,16 @@ to expose it.
 
 ## Deploying
 
-`npm run build` produces a static `dist/` — around 262 kB of JS (about 84 kB
-gzipped) and 43 kB of CSS across 160 modules. Host it anywhere (Vercel, Netlify,
-Cloudflare Pages, GitHub Pages). Two required steps:
+`npm run build` produces a static `dist/` — plain files, no server runtime — and
+prints the current bundle sizes as it goes. Host it anywhere (Vercel, Netlify,
+Cloudflare Pages, GitHub Pages). Three required steps:
 
 1. Set `VITE_GOOGLE_CLIENT_ID` in the host's build environment.
 2. Add the deployed origin to **Authorized JavaScript origins** on the OAuth client.
+3. Serve it from a **secure context** (HTTPS, or `localhost`). Event IDs are derived
+   with `crypto.subtle`, which browsers expose only in a secure context, so on a
+   plain-HTTP origin the app dies at the first milestone with "Cannot read
+   properties of undefined (reading 'digest')".
 
 ## Design docs
 
