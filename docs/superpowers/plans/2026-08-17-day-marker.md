@@ -4471,15 +4471,19 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
         </span>
       </header>
 
+      {/*
+        No role="alert" on either Alert below: shadcn's Alert sets it itself, and
+        adding it would also risk two elements matching getByRole('alert') at once.
+        This comment belongs here, in children position. A JSX comment placed
+        inside one of the parenthesised && expressions below is a syntax error.
+      */}
       {!gisReady && (
-        {/* shadcn's Alert already sets role="alert" itself. */}
         <Alert variant="destructive">
           <AlertDescription>{COPY.scriptBlocked}</AlertDescription>
         </Alert>
       )}
 
       {state.error && (
-        {/* shadcn's Alert already sets role="alert" itself. */}
         <Alert variant="destructive">
           <AlertDescription>{state.error}</AlertDescription>
         </Alert>
