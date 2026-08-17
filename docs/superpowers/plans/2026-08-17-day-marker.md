@@ -4933,6 +4933,70 @@ git commit -m "docs: add README and manual verification checklist"
 
 ---
 
+## Amendments after the final review
+
+Everything above describes the plan as executed, task by task. The whole-branch
+review that followed Task 14 then found defects that only appear in the **seams
+between** tasks — which per-task review structurally cannot see, since each task
+was reviewed in isolation against its own brief. Those fixes landed in one commit
+after the fact, so the code blocks above are the plan, and this section is the
+delta. Read both.
+
+Applied in `0ee220f` (194 → 205 tests):
+
+1. **`retryFailed` discarded the first pass's successes.** `run()` called
+   `setResults([])` unconditionally, so a successful "Reconnect and finish the
+   remaining 3" reported "3 milestones added" and dropped the other 10; mid-retry,
+   already-added rows reverted to `Queued`. `run` now takes
+   `previous: ItemResult[] = []`, seeding both the progress accumulator and the
+   final state. **This survived every earlier review because no test anywhere
+   covered a retry that *succeeds*** — both retry tests deliberately failed the
+   reconnect. That test now exists.
+2. **`gisReady` is tri-state (`boolean | null`).** Defaulting to `true` left
+   Connect enabled for the whole 10-second readiness poll, so an ad-blocked user
+   got a raw `AuthError` string instead of `COPY.scriptBlocked`, then a second
+   alert ten seconds later.
+3. **`apply.ts` no longer casts settled results blind.** A throwing `onProgress`
+   could put `undefined` into React state. Both `apply.ts` and `plan.ts` now scan
+   for a rejected slot and throw its reason; `plan.ts`'s cast is gone.
+4. Deleted a **vacuous test** in `ResultSummary.test.tsx` that also passed against
+   the pre-fix component.
+5. **`PlanStatus` is now checked at both ends** — an exhaustiveness check in
+   `apply.ts`, and `plan.ts`'s probe callback annotated `Promise<PlanItem>`. A
+   `status: 'nwe'` typo previously compiled clean.
+6. **`setPhase('probing')` moved inside the debounce**, so typing in Label no
+   longer blanks all 13 badges per keystroke — **plus a `reprobePending` flag**,
+   because that move alone left the action button live for 400 ms against a stale
+   plan, and `applyOne` skips on a stale `needsUpdate: false`: a Label edit
+   followed by a quick submit was silently dropped, reporting "Unchanged". The
+   flag is set synchronously where `setPhase('probing')` used to be, cleared on
+   both settle paths inside the `probeToken` guard, and folded into `busy`.
+7. **403 `quotaExceeded` and `dailyLimitExceeded` are `RateLimited`.** As
+   `Unauthorized` they blocked the retry *and* tripped `applyPlan`'s halt, so a
+   quota blip cancelled every queued write and blamed the connection.
+8. **An all-`skipped` submission no longer claims events were added** —
+   `COPY.unchangedSubhead`.
+9. **README:** stale test/bundle counts removed, Node 20+ stated and declared in
+   `package.json` `engines`, and the secure-context requirement noted, since
+   `crypto.subtle` is `SecureContext`-only and a plain-HTTP deploy fails obscurely.
+10. **`run()` catches `applyPlan`'s rejection**, a path item 3 created.
+
+### Parked with rulings, not fixed
+
+- **User-facing English still lives outside `COPY` on error paths** —
+  `HALTED_MESSAGE`, four `AuthError` messages, and every raw `ApiError.message`
+  reaching the alert verbatim (a user can see "Google Calendar API 409
+  (duplicate): cannot reuse id" where the spec asks for plain language). Closing
+  it needs a `COPY.itemFailed(status)` mapping plus updates to tests that assert
+  on those strings; doing that beside ten other fixes risked the green suite
+  immediately before merge. It deserves its own change and its own review.
+- **No `PATCH → 404 → POST` counterpart** to the `POST → 409 → PATCH` fallback.
+  If Google fully purges an event between probe and write, a `deleted`/`exists`
+  PATCH 404s and the item fails where an insert would have succeeded. Parked
+  because it is speculative until `docs/manual-verification.md` check 4 actually
+  runs — an untested inverse fallback added on a guess is worse than a documented
+  gap, and that check is designed to surface exactly this.
+
 ## Deferred (from the spec — do not build)
 
 - Discovering previously registered sets via `privateExtendedProperty`. The data
