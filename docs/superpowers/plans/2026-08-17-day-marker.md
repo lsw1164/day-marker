@@ -957,7 +957,6 @@ Turns a milestone into the exact JSON body Google receives. Two details carry re
 - Produces:
   - `type ReminderPreset = 'none' | 'day1' | 'day3' | 'week1'`
   - `REMINDER_MINUTES: Record<ReminderPreset, number | null>`
-  - `REMINDER_LABELS: Record<ReminderPreset, string>`
   - `REMINDER_ORDER: ReminderPreset[]`, `DEFAULT_REMINDER: ReminderPreset`
   - `interface EventOptions { start: CalendarDate; label: string; reminder: ReminderPreset }`
   - `interface GoogleEventPayload` — the request body shape
@@ -1085,12 +1084,9 @@ export const REMINDER_MINUTES: Record<ReminderPreset, number | null> = {
   week1: 9540,
 }
 
-export const REMINDER_LABELS: Record<ReminderPreset, string> = {
-  none: 'No reminder',
-  day1: '1 day before, 9:00 AM',
-  day3: '3 days before, 9:00 AM',
-  week1: '1 week before, 9:00 AM',
-}
+// The user-facing labels for these presets live in `ui/copy.ts`, not here.
+// `domain/` owns the arithmetic; every English string the user reads belongs in
+// one place, and four of them hiding in the domain layer defeats that.
 
 export const REMINDER_ORDER: ReminderPreset[] = ['none', 'day1', 'day3', 'week1']
 
@@ -2862,6 +2858,7 @@ Create `src/ui/copy.test.ts`:
 ```ts
 import { describe, expect, it } from 'vitest'
 import { actionLabel, countPlan, COPY, outcomeLabel } from '@/ui/copy'
+import { REMINDER_ORDER } from '@/domain/reminders'
 import type { PlanItem, PlanStatus } from '@/google/plan'
 import { computeMilestones } from '@/domain/milestones'
 import { calendarDate } from '@/domain/calendarDate'
@@ -2907,6 +2904,17 @@ describe('actionLabel', () => {
   })
 })
 
+describe('COPY.reminderLabels', () => {
+  it('names every preset in REMINDER_ORDER', () => {
+    // These four strings previously lived in domain/reminders.ts with no test
+    // anywhere. A preset added without its label would render as blank text.
+    for (const preset of REMINDER_ORDER) {
+      expect(COPY.reminderLabels[preset]).toBeTruthy()
+    }
+    expect(Object.keys(COPY.reminderLabels).sort()).toEqual([...REMINDER_ORDER].sort())
+  })
+})
+
 describe('outcomeLabel', () => {
   it.each([
     ['added', 'Added'],
@@ -2928,6 +2936,7 @@ Expected: FAIL — `Failed to resolve import "@/ui/copy"`.
 - [ ] **Step 3: Write `src/ui/copy.ts`**
 
 ```ts
+import type { ReminderPreset } from '@/domain/reminders'
 import type { ItemOutcome } from '@/google/apply'
 import type { PlanItem, PlanStatus } from '@/google/plan'
 
@@ -2945,6 +2954,14 @@ export const COPY = {
   range: 'Range',
   reminder: 'Reminder',
   yearsOption: (n: number) => (n === 1 ? '1 year' : `${n} years`),
+  // Every string the user reads lives here, including these — `domain/reminders.ts`
+  // owns the minute arithmetic, not the wording.
+  reminderLabels: {
+    none: 'No reminder',
+    day1: '1 day before, 9:00 AM',
+    day3: '3 days before, 9:00 AM',
+    week1: '1 week before, 9:00 AM',
+  } satisfies Record<ReminderPreset, string>,
 
   pickADate: 'Pick a start date to see your milestones.',
   milestoneCount: (n: number) => (n === 1 ? '1 milestone' : `${n} milestones`),
@@ -3534,7 +3551,7 @@ Use **native `<select>` and `<input type="checkbox">`**, not the generated shadc
 - Test: `src/ui/StartDateForm.test.tsx`
 
 **Interfaces:**
-- Consumes: `Phase`; `Milestone`; `PlanItem`; `ItemResult`; `CalendarDate`, `formatLong`; `COPY`, `statusLabel`, `outcomeLabel`; `YEAR_OPTIONS`, `MIN_YEARS`, `MAX_YEARS`; `REMINDER_ORDER`, `REMINDER_LABELS`, `ReminderPreset`
+- Consumes: `Phase`; `Milestone`; `PlanItem`; `ItemResult`; `CalendarDate`, `formatLong`; `COPY` (including `COPY.reminderLabels`), `statusLabel`, `outcomeLabel`; `YEAR_OPTIONS`, `MIN_YEARS`, `MAX_YEARS`; `REMINDER_ORDER`, `ReminderPreset`
 - Produces:
   - `interface Row { key: string; name: string; date: string; badge: string; checked: boolean; selectable: boolean; muted: boolean; failed: boolean }`
   - `buildRows(input: BuildRowsInput): Row[]`
@@ -3898,7 +3915,7 @@ Expected: FAIL — both modules unresolved.
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { MAX_YEARS, MIN_YEARS, YEAR_OPTIONS } from '@/domain/milestones'
-import { REMINDER_LABELS, REMINDER_ORDER, type ReminderPreset } from '@/domain/reminders'
+import { REMINDER_ORDER, type ReminderPreset } from '@/domain/reminders'
 import { COPY } from '@/ui/copy'
 
 const SELECT_CLASS =
@@ -3982,7 +3999,7 @@ export function StartDateForm({
           >
             {REMINDER_ORDER.map((preset) => (
               <option key={preset} value={preset}>
-                {REMINDER_LABELS[preset]}
+                {COPY.reminderLabels[preset]}
               </option>
             ))}
           </select>
