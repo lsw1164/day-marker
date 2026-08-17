@@ -42,6 +42,9 @@ export const COPY = {
   progress: (done: number, total: number) => `${done} of ${total}`,
   queued: 'Queued',
 
+  // Decorative, but it lives here so the "no literals in components" rule stays
+  // absolute rather than requiring a judgement call about what counts as copy.
+  celebration: '🎉',
   doneHeadline: (n: number) => (n === 1 ? '1 milestone' : `${n} milestones`),
   doneSubhead: 'added to your calendar',
   andMore: (n: number) => `and ${n} more…`,

@@ -122,8 +122,14 @@ export function useDayMarker({
     // api and auth are intentionally absent — see the apiRef/authRef note above.
   }, [connected, options, milestones, todayDate, probeDelayMs, probeNonce])
 
+  /**
+   * Returns whether a usable token was obtained. Callers need that answer:
+   * `retryFailed` must not write with a dead token, and it cannot read the
+   * `connected` state to find out — that value is captured in this callback's
+   * closure and would be stale.
+   */
   const connect = useCallback(
-    async (prompt: GisPrompt = '') => {
+    async (prompt: GisPrompt = ''): Promise<boolean> => {
       try {
         // Called before any await so the popup survives the user gesture. It stays
         // inside the try and is always awaited, so a handler is attached — clear()
@@ -133,17 +139,19 @@ export function useDayMarker({
         await promise
         setError(null)
         setConnected(true)
+        return true
       } catch (e) {
         const message = e instanceof Error ? e.message : ''
         // A double-click: the popup the user already opened is still open, so
         // there is nothing to tell them and nothing to change.
-        if (message === SIGN_IN_IN_PROGRESS) return
+        if (message === SIGN_IN_IN_PROGRESS) return false
         // clear() abandoned this call. The path that called clear() is already
         // reporting its own error; overwriting it with this one would replace the
         // real cause with a symptom.
-        if (message === SIGN_IN_CANCELLED) return
+        if (message === SIGN_IN_CANCELLED) return false
         setError(describe(e))
         setConnected(false)
+        return false
       }
     },
     [],
@@ -187,7 +195,10 @@ export function useDayMarker({
   const retryFailed = useCallback(async () => {
     const failed = results.filter((r) => r.outcome === 'failed').map((r) => r.item)
     if (failed.length === 0) return
-    await connect('')
+    // Stop if the reconnect failed. `connect` has already reported why, and
+    // writing with a dead token would re-fail every item — replacing that
+    // explanation with a fresh pile of 401s and telling the user nothing.
+    if (!(await connect(''))) return
     await run(failed)
   }, [results, connect, run])
 

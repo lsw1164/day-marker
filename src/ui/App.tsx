@@ -76,7 +76,14 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
         </Alert>
       )}
 
-      {state.error && (
+      {/*
+        Gated on phase: in `done`, ResultSummary renders its own Alert, and an
+        ungated one here would put two role="alert" elements on screen at once —
+        reachable by clicking "Reconnect and finish the remaining N" and then
+        cancelling the popup. The error is passed down instead, so that screen
+        reports it in its single Alert.
+      */}
+      {state.phase !== 'done' && state.error && (
         <Alert variant="destructive">
           <AlertDescription>{state.error}</AlertDescription>
         </Alert>
@@ -85,6 +92,7 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
       {state.phase === 'done' ? (
         <ResultSummary
           results={state.results}
+          error={state.error}
           onRetry={() => void state.retryFailed()}
           onReset={state.reset}
         />
@@ -107,7 +115,12 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
           ) : (
             <>
               {state.phase === 'applying' && (
-                <Progress value={(state.results.length / Math.max(rows.length, 1)) * 100} />
+                // aria-label: the numeric context lives in the list heading, so
+                // without this a screen reader announces an unlabelled progressbar.
+                <Progress
+                  aria-label={COPY.applying}
+                  value={(state.results.length / Math.max(rows.length, 1)) * 100}
+                />
               )}
               <MilestoneList heading={heading} rows={rows} onToggle={state.toggle} />
             </>

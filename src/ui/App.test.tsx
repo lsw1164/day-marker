@@ -81,4 +81,45 @@ describe('App — errors', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/could not load/)
     expect(screen.getByRole('button', { name: /Connect Google account/ })).toBeDisabled()
   })
+
+  it('never shows two alerts when a retry reconnect fails', async () => {
+    // The whole path: write everything, have every item fail, then click
+    // "Reconnect and finish…" with a reconnect that fails for a reason the hook
+    // does not swallow. Previously App's error Alert and ResultSummary's failure
+    // Alert both rendered, leaving two role="alert" elements on screen.
+    const d = deps()
+    ;(d.api.insertEvent as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('insert exploded'),
+    )
+    render(<App deps={d} checkGisReady={gisReady} />)
+    enterStartDate('2026-01-01')
+    await userEvent.click(screen.getByRole('button', { name: /Connect Google account/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Add 12' }))
+    const retry = await screen.findByRole('button', { name: /Reconnect and finish/ })
+
+    ;(d.auth.connect as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('popup_closed'))
+    await userEvent.click(retry)
+
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+    expect(screen.getByRole('alert')).toHaveTextContent('popup_closed')
+  })
+
+  it('does not attempt writes when a retry reconnect fails', async () => {
+    const d = deps()
+    ;(d.api.insertEvent as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('insert exploded'),
+    )
+    render(<App deps={d} checkGisReady={gisReady} />)
+    enterStartDate('2026-01-01')
+    await userEvent.click(screen.getByRole('button', { name: /Connect Google account/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Add 12' }))
+    const retry = await screen.findByRole('button', { name: /Reconnect and finish/ })
+    const writesBefore = (d.api.insertEvent as ReturnType<typeof vi.fn>).mock.calls.length
+
+    ;(d.auth.connect as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('popup_closed'))
+    await userEvent.click(retry)
+
+    // Writing with a dead token would re-fail every item and bury the real cause.
+    expect((d.api.insertEvent as ReturnType<typeof vi.fn>).mock.calls.length).toBe(writesBefore)
+  })
 })

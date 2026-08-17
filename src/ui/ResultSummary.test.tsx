@@ -66,4 +66,47 @@ describe('ResultSummary — partial failure', () => {
     await userEvent.click(button)
     expect(onRetry).toHaveBeenCalled()
   })
+
+  it('renders exactly one alert even when both failures and an error are present', () => {
+    // The reachable case: a retry whose reconnect popup is cancelled. Two
+    // role="alert" elements would make every getByRole('alert') query ambiguous
+    // and give the user two competing error boxes.
+    render(
+      <ResultSummary
+        results={results}
+        error="Sign-in was cancelled"
+        onRetry={() => {}}
+        onReset={() => {}}
+      />,
+    )
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+  })
+
+  it('prefers the live error over a stored item error', () => {
+    render(
+      <ResultSummary
+        results={results}
+        error="Sign-in was cancelled"
+        onRetry={() => {}}
+        onReset={() => {}}
+      />,
+    )
+    // The newer cause explains the situation; 'boom' was recorded last attempt.
+    expect(screen.getByRole('alert')).toHaveTextContent('Sign-in was cancelled')
+    expect(screen.getByRole('alert')).not.toHaveTextContent('boom')
+  })
+
+  it('shows an error alert even when nothing failed', () => {
+    render(
+      <ResultSummary
+        results={[result(0, 'added')]}
+        error="Sign-in was cancelled"
+        onRetry={() => {}}
+        onReset={() => {}}
+      />,
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent('Sign-in was cancelled')
+    // The celebration block must not appear alongside an error.
+    expect(screen.queryByText('added to your calendar')).not.toBeInTheDocument()
+  })
 })
