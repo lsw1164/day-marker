@@ -2579,7 +2579,20 @@ function deps(items: GoogleEvent[], token: string | null = 'tok'): DayMarkerDeps
 const ready = async () => true
 const TODAY = calendarDate('2026-06-01')
 
-const TWO = [ev('a', '2025-03-14', 'd100', '2025-06-21'), ev('b', '2025-03-14', 'y1', '2026-03-14')]
+// Two genuinely distinct registrations -- different start dates, titles, and
+// event counts -- NOT two events sharing one start date, which groupByStartDate
+// would collapse into a single registration. A one-registration fixture cannot
+// distinguish code that acts on "the registration the user clicked" from code
+// that acts on `registrations[0]`, or that matches a result to a row by array
+// position instead of by identity. Every assertion targeting registration B
+// exists to catch that class of bug, and it is the class this page is the only
+// place able to catch: Tasks 8 and 9 test the hook and the row in isolation.
+const REG_A = [ev('a1', '2025-03-14', 'd100', '2025-06-21')]
+const REG_B = [
+  ev('b1', '2024-01-01', 'y1', '2025-01-01', 'Cara & Dan'),
+  ev('b2', '2024-01-01', 'y2', '2026-01-01', 'Cara & Dan'),
+]
+const TWO = [...REG_A, ...REG_B]
 
 describe('RegistrationsPage', () => {
   it('prompts to connect when there is no token', () => {
