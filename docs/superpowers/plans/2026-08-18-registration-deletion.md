@@ -1623,7 +1623,12 @@ describe('deleteRegistration', () => {
     const out = await deleteRegistration(apiWith(deleteEvent), evs(5), () => {}, RETRY)
     expect(out).toHaveLength(5)
     expect(out.every((r) => r.outcome === 'failed')).toBe(true)
-    expect(out.filter((r) => r.error === DELETE_HALTED)).toHaveLength(2)
+    // Three, not two: the two never attempted PLUS the one that 401'd. At
+    // concurrency 3 a run of 3 or fewer events has nothing queued behind the
+    // failure, so stamping only the skipped items would leave a genuine halt
+    // with no DELETE_HALTED anywhere and the UI's reconnect path would never
+    // fire. See the ledger's F39.
+    expect(out.filter((r) => r.error === DELETE_HALTED)).toHaveLength(3)
     expect(deleteEvent).toHaveBeenCalledTimes(3)
   })
 
@@ -1723,7 +1728,10 @@ export async function deleteRegistration(
       onProgress(result)
       return result
     } catch (error) {
-      // Losing the token invalidates every remaining delete, so stop scheduling.
+      // Losing the token invalidates every remaining delete, so stop scheduling
+      // -- and stamp the trigger with the sentinel too, not just the items
+      // queued behind it, or a run of 3 or fewer events (nothing queued at
+      // concurrency 3) would report a halt that ui/ cannot detect.
       if (error instanceof Unauthorized) halted = true
       const result: DeleteResult = {
         event,
