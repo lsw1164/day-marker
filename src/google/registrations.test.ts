@@ -54,10 +54,14 @@ describe('groupByStartDate', () => {
     expect(out.map((r) => r.startDate)).toEqual(['2027-05-05', '2026-01-01', '2025-03-14'])
   })
 
-  it('titles a registration from its first event summary, so a label shows', () => {
+  it('titles a registration from its earliest event, not whatever the API returned first', () => {
     const out = groupByStartDate([
+      ev('b', '2025-03-14', 'y1', '2026-03-14', 'Anna & Ben: 1 Year'),
       ev('a', '2025-03-14', 'd100', '2025-06-21', 'Anna & Ben: Day 100'),
     ])
+    // Google's events.list sets no orderBy, so input order is arbitrary. Titling
+    // from the earliest event keeps the same registration from renaming itself
+    // between loads.
     expect(out[0]?.title).toBe('Anna & Ben: Day 100')
   })
 
