@@ -93,6 +93,14 @@ describe('groupByStartDate', () => {
     ])
   })
 
+  it('does not invent a number for a truncated milestone key', () => {
+    const out = groupByStartDate([
+      ev('a', '2025-03-14', 'd', '2025-06-21'),
+      ev('b', '2025-03-14', 'y', '2026-03-14'),
+    ])
+    expect(out[0]?.events.map((e) => e.label)).toEqual(['d', 'y'])
+  })
+
   it('ignores events with no stamped start date', () => {
     // Someone else's event that happens to carry dayMarkerVersion, or a corrupted
     // one. It cannot be attributed to a registration, so it is not invented into one.
