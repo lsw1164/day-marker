@@ -64,10 +64,26 @@ describe('groupByStartDate', () => {
     // from the earliest event keeps the same registration from renaming itself
     // between loads.
     expect(out[0]?.title).toBe('Anna & Ben: Day 100')
+    // Pins the shape returned to callers: `sorted` internally carries a
+    // `summary` field that `RegistrationEvent` does not declare, and this is
+    // the only fixture in the file where every event has a real (non-empty)
+    // summary, so a leaked `summary` key here cannot hide behind toEqual's
+    // "undefined keys are absent" rule.
+    expect(out[0]?.events).toEqual([
+      { id: 'a', date: '2025-06-21', label: 'Day 100' },
+      { id: 'b', date: '2026-03-14', label: '1 Year' },
+    ])
   })
 
   it('falls back to the formatted start date when no summary exists', () => {
     const out = groupByStartDate([ev('a', '2025-03-14', 'd100', '2025-06-21')])
+    expect(out[0]?.title).toBe('Mar 14, 2025')
+  })
+
+  it('falls back to the formatted start date when the summary is blank', () => {
+    // A retitled-to-empty (or whitespace-only) event must not leave the
+    // confirm-before-delete row with no identifying text at all.
+    const out = groupByStartDate([ev('a', '2025-03-14', 'd100', '2025-06-21', '   ')])
     expect(out[0]?.title).toBe('Mar 14, 2025')
   })
 
@@ -77,6 +93,21 @@ describe('groupByStartDate', () => {
       ev('a', '2025-03-14', 'd100', '2025-06-21'),
     ])
     expect(out[0]?.events.map((e) => e.id)).toEqual(['a', 'b'])
+  })
+
+  it('breaks a tie between events on the same date by id, so the order is total', () => {
+    // Array#sort is stable, so a comparator that returns 0 for equal dates
+    // would let two same-dated events keep whatever order the API happened
+    // to return them in -- the exact nondeterminism the earliest-event
+    // titling was added to close. Only reachable via hand-edited dates
+    // today (no two of our own milestones ever land on the same day), but
+    // cheap to close regardless.
+    const first = ev('a', '2025-03-14', 'd100', '2025-06-21', 'A')
+    const second = ev('b', '2025-03-14', 'y1', '2025-06-21', 'B')
+    const reversed = groupByStartDate([second, first])
+    const forwards = groupByStartDate([first, second])
+    expect(reversed[0]?.events.map((e) => e.id)).toEqual(['a', 'b'])
+    expect(forwards[0]?.events.map((e) => e.id)).toEqual(['a', 'b'])
   })
 
   it('labels each event from its milestone key', () => {

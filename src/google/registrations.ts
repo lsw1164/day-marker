@@ -80,15 +80,25 @@ export function groupByStartDate(events: GoogleEvent[]): Registration[] {
 
   return [...groups.entries()]
     .map(([startDate, list]) => {
-      const sorted = [...list].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+      const sorted = [...list].sort((a, b) => {
+        if (a.date < b.date) return -1
+        if (a.date > b.date) return 1
+        // Equal dates: tie-break on id so the order is total. Array#sort is
+        // stable, so without this two same-dated events would keep whatever
+        // order the API happened to return them in -- the exact
+        // nondeterminism the earliest-event titling below was added to close.
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+      })
+      const earliest = sorted[0]?.summary
       return {
         startDate,
         // Google's events.list sets no orderBy, so input order is arbitrary.
         // Titling from the earliest-dated event keeps a registration from
-        // renaming itself between loads depending on API response order.
-        // `sorted[0]` covers both an empty summary and (impossibly) an empty
-        // group in one expression.
-        title: sorted[0]?.summary ?? formatLong(startDate),
+        // renaming itself between loads depending on API response order. A
+        // blank or whitespace-only summary (a user can retitle an event to
+        // nothing) falls back to the formatted start date rather than
+        // leaving the confirm-before-delete row with no identifying text.
+        title: earliest && earliest.trim() ? earliest : formatLong(startDate),
         count: sorted.length,
         // Rebuilt rather than passed through: `sorted` is `Attributed`, so
         // handing it back would put a `summary` key on every event that
