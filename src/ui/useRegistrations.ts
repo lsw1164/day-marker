@@ -130,10 +130,18 @@ export function useRegistrations({ auth, api, retryDeps }: RegistrationsDeps) {
   const refresh = useCallback(() => setLoadNonce((n) => n + 1), [])
 
   const beginConfirm = useCallback((startDate: CalendarDate) => {
+    // A delete in flight owns the screen. Retargeting `confirming` would drop
+    // the running row back to its list state, and since results are matched
+    // by event id, its outcomes would then render against no row at all --
+    // the user would lose every trace of a deletion they cannot undo.
+    if (deletingRef.current) return
     setConfirming(startDate)
   }, [])
 
-  const cancelConfirm = useCallback(() => setConfirming(null), [])
+  const cancelConfirm = useCallback(() => {
+    if (deletingRef.current) return
+    setConfirming(null)
+  }, [])
 
   const confirmDelete = useCallback(async () => {
     const target = registrations.find((r) => r.startDate === confirming)

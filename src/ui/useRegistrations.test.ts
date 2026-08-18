@@ -268,6 +268,81 @@ describe('useRegistrations', () => {
     expect(result.current.phase).toBe('done')
   })
 
+  it('keeps confirming on the deleting row when beginConfirm targets another row mid-delete', async () => {
+    // Task 9 renders the "Delete…" button whenever a row is in the 'list'
+    // state, which every row except the active one is -- including while
+    // that active row is 'deleting'. If beginConfirm retargeted `confirming`
+    // here, the deleting row would drop back to 'list' and lose its progress
+    // display, and because Task 9 matches results by event id, the running
+    // delete's outcomes would then render against no row at all: the user
+    // starts an un-undoable operation and loses every trace of what it did.
+    const d = deps()
+    ;(d.api.listEvents as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [
+        ev('a', '2025-03-14', 'd100', '2025-06-21'),
+        ev('b', '2025-03-14', 'y1', '2026-03-14'),
+        ev('c', '2020-01-01', 'y1', '2021-01-01'),
+      ],
+    })
+    // Genuinely mid-run, not already settled -- a resolver queue holds the
+    // delete open so the retarget attempt lands while phase is still
+    // 'deleting', not after it has already resolved to 'done'.
+    const resolvers: ((v: 'deleted') => void)[] = []
+    ;(d.api.deleteEvent as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise((resolve) => resolvers.push(resolve)),
+    )
+    const { result } = renderHook(() => useRegistrations(d))
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+    act(() => result.current.beginConfirm(calendarDate('2025-03-14')))
+
+    let finished!: Promise<void>
+    act(() => {
+      finished = result.current.confirmDelete()
+    })
+    await waitFor(() => expect(result.current.phase).toBe('deleting'))
+
+    act(() => result.current.beginConfirm(calendarDate('2020-01-01')))
+    expect(result.current.confirming).toBe('2025-03-14')
+
+    act(() => resolvers.forEach((r) => r('deleted')))
+    await act(async () => {
+      await finished
+    })
+    expect(result.current.phase).toBe('done')
+    expect(result.current.results).toHaveLength(2)
+  })
+
+  it('leaves confirming set when cancelConfirm is called mid-delete', async () => {
+    // Same hazard as above, reached through cancelConfirm instead of a
+    // retarget: clearing `confirming` while the delete it names is still
+    // running would drop that row back to 'list' with nowhere for its
+    // results to land.
+    const d = deps()
+    const resolvers: ((v: 'deleted') => void)[] = []
+    ;(d.api.deleteEvent as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise((resolve) => resolvers.push(resolve)),
+    )
+    const { result } = renderHook(() => useRegistrations(d))
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+    act(() => result.current.beginConfirm(calendarDate('2025-03-14')))
+
+    let finished!: Promise<void>
+    act(() => {
+      finished = result.current.confirmDelete()
+    })
+    await waitFor(() => expect(result.current.phase).toBe('deleting'))
+
+    act(() => result.current.cancelConfirm())
+    expect(result.current.confirming).toBe('2025-03-14')
+
+    act(() => resolvers.forEach((r) => r('deleted')))
+    await act(async () => {
+      await finished
+    })
+    expect(result.current.phase).toBe('done')
+    expect(result.current.results).toHaveLength(2)
+  })
+
   it('translates a repeated page token into the pagination-looped copy', async () => {
     const d = deps()
     ;(d.api.listEvents as ReturnType<typeof vi.fn>).mockResolvedValue({
