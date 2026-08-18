@@ -52,6 +52,7 @@ export function RegistrationsPage({
           </p>
           <Button
             variant="outline"
+            className="min-h-11"
             disabled={gisReady !== true}
             onClick={() => void connect()}
           >

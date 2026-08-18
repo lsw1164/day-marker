@@ -140,7 +140,7 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
             <div className="mx-auto max-w-md">
               {state.connected ? (
                 <Button
-                  className="w-full"
+                  className="w-full min-h-11"
                   disabled={busy || state.counts.selected === 0}
                   onClick={() => void state.submit()}
                 >
@@ -148,7 +148,7 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
                 </Button>
               ) : (
                 <Button
-                  className="w-full"
+                  className="w-full min-h-11"
                   variant="outline"
                   // Only an affirmative `true` enables it: while readiness is
                   // still unknown a click would reach GIS before the script has

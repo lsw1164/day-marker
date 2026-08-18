@@ -76,19 +76,19 @@ export function ResultSummary({ results, error, onRetry, onReset }: ResultSummar
 
       <div className="flex gap-2">
         {failed.length > 0 ? (
-          <Button className="flex-1" variant="destructive" onClick={onRetry}>
+          <Button className="flex-1 min-h-11" variant="destructive" onClick={onRetry}>
             {COPY.retryFailed(failed.length)}
           </Button>
         ) : (
           <>
-            <Button variant="secondary" onClick={onReset}>
+            <Button variant="secondary" className="min-h-11" onClick={onReset}>
               {COPY.startOver}
             </Button>
             {first && (
               // shadcn's Button is @base-ui/react-backed: it has no `asChild`.
               // base-ui composes via a `render` element instead.
               <Button
-                className="flex-1"
+                className="flex-1 min-h-11"
                 render={<a href={calendarDayUrl(first)} target="_blank" rel="noreferrer" />}
               >
                 {COPY.viewInCalendar}
