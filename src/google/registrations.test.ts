@@ -132,20 +132,38 @@ describe('groupByStartDate', () => {
   })
 })
 
-function apiReturning(pages: EventListPage[]): CalendarApi {
-  let call = 0
+/**
+ * A token-driven page server. Unlike a call-counting mock it checks that the
+ * loop sends back exactly the token it was handed: an unrecognised token throws
+ * instead of quietly serving the next page in sequence. The call ceiling turns a
+ * non-terminating loop into an immediate, labelled failure -- a mock that runs
+ * out of fixtures and returns an empty page would let that bug pass, which is
+ * what the previous helper did.
+ */
+function apiServing(pages: Record<string, EventListPage>): CalendarApi {
+  let calls = 0
   return {
     getEvent: vi.fn(),
     insertEvent: vi.fn(),
     patchEvent: vi.fn(),
     deleteEvent: vi.fn(),
-    listEvents: vi.fn(async () => pages[call++] ?? { items: [] }),
+    listEvents: vi.fn(async ({ pageToken }: { pageToken?: string }) => {
+      calls += 1
+      if (calls > 10) {
+        throw new Error(`listEvents called ${calls} times: the pagination loop is not terminating`)
+      }
+      const page = pages[pageToken ?? '']
+      if (!page) {
+        throw new Error(`listEvents asked for an unknown pageToken: ${JSON.stringify(pageToken)}`)
+      }
+      return page
+    }),
   } as unknown as CalendarApi
 }
 
 describe('listRegistrations', () => {
   it('queries with the discovery filter', async () => {
-    const api = apiReturning([{ items: [] }])
+    const api = apiServing({ '': { items: [] } })
     await listRegistrations(api)
     expect(api.listEvents).toHaveBeenCalledWith({
       privateExtendedProperty: DISCOVERY_FILTER,
@@ -153,33 +171,32 @@ describe('listRegistrations', () => {
     })
   })
 
-  it('follows nextPageToken and merges every page', async () => {
-    // The whole point: a registration that exists on page two must be findable.
+  it('follows nextPageToken across every page, in order', async () => {
+    // The whole point: a registration that exists on page three must be findable.
     // Showing only page one would be worse than having no list at all.
-    const api = apiReturning([
-      { items: [ev('a', '2025-03-14', 'd100', '2025-06-21')], nextPageToken: 'p2' },
-      { items: [ev('b', '2026-01-01', 'd100', '2026-04-10')] },
-    ])
-    const out = await listRegistrations(api)
-    expect(api.listEvents).toHaveBeenCalledTimes(2)
-    expect((api.listEvents as ReturnType<typeof vi.fn>).mock.calls[1]![0]).toEqual({
-      privateExtendedProperty: DISCOVERY_FILTER,
-      pageToken: 'p2',
+    const api = apiServing({
+      '': { items: [ev('a', '2025-03-14', 'd100', '2025-06-21')], nextPageToken: 'p2' },
+      p2: { items: [ev('b', '2026-01-01', 'd100', '2026-04-10')], nextPageToken: 'p3' },
+      p3: { items: [ev('c', '2027-05-05', 'd100', '2027-08-12')] },
     })
-    expect(out.map((r) => r.startDate)).toEqual(['2026-01-01', '2025-03-14'])
+    const out = await listRegistrations(api)
+    const calls = (api.listEvents as ReturnType<typeof vi.fn>).mock.calls
+    expect(calls.map((c) => c[0].pageToken)).toEqual([undefined, 'p2', 'p3'])
+    expect(calls.every((c) => c[0].privateExtendedProperty === DISCOVERY_FILTER)).toBe(true)
+    expect(out.map((r) => r.startDate)).toEqual(['2027-05-05', '2026-01-01', '2025-03-14'])
   })
 
   it('stops after one page when there is no token', async () => {
-    const api = apiReturning([{ items: [] }])
+    const api = apiServing({ '': { items: [] } })
     await listRegistrations(api)
     expect(api.listEvents).toHaveBeenCalledTimes(1)
   })
 
   it('merges pages that belong to the same registration', async () => {
-    const api = apiReturning([
-      { items: [ev('a', '2025-03-14', 'd100', '2025-06-21')], nextPageToken: 'p2' },
-      { items: [ev('b', '2025-03-14', 'y1', '2026-03-14')] },
-    ])
+    const api = apiServing({
+      '': { items: [ev('a', '2025-03-14', 'd100', '2025-06-21')], nextPageToken: 'p2' },
+      p2: { items: [ev('b', '2025-03-14', 'y1', '2026-03-14')] },
+    })
     const out = await listRegistrations(api)
     expect(out).toHaveLength(1)
     expect(out[0]?.count).toBe(2)
