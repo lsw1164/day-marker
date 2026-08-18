@@ -1,8 +1,15 @@
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
+import userEvent from '@testing-library/user-event'
+import { afterEach } from 'vitest'
 import { Header } from '@/ui/Header'
 import { COPY } from '@/ui/copy'
+
+afterEach(() => {
+  localStorage.clear()
+  document.documentElement.classList.remove('dark')
+})
 
 function renderAt(path: string) {
   // NavLink needs a router in context; MemoryRouter also lets us assert which
@@ -44,5 +51,24 @@ describe('Header', () => {
   it('names the navigation region', () => {
     renderAt('/')
     expect(screen.getByRole('navigation', { name: COPY.navLabel })).toBeInTheDocument()
+  })
+
+  it('labels the theme control with both its state and its action', () => {
+    renderAt('/')
+    const button = screen.getByRole('button', { name: /Theme: / })
+    // An icon-only cycling control is unreadable to a screen reader without
+    // saying what pressing it will do — "Sun" alone tells you nothing.
+    expect(button).toHaveAccessibleName(/Switch to/)
+    expect(button).toHaveAttribute('title')
+  })
+
+  it('cycles the theme when pressed', async () => {
+    renderAt('/')
+    const button = screen.getByRole('button', { name: /Theme: / })
+    await userEvent.click(button)
+    expect(screen.getByRole('button', { name: /Theme: light/ })).toBeInTheDocument()
+    await userEvent.click(button)
+    expect(screen.getByRole('button', { name: /Theme: dark/ })).toBeInTheDocument()
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
   })
 })
