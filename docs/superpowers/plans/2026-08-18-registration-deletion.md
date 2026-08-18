@@ -2639,14 +2639,31 @@ git commit -m "feat(ui): list and delete registrations"
 ### Task 11: Docs — the deployment requirement and four manual checks
 
 **Files:**
+- Create: `public/_redirects`
 - Modify: `README.md`
 - Modify: `docs/manual-verification.md`
 
 **Interfaces:**
 - Consumes: the whole feature
-- Produces: documentation only
+- Produces: documentation only, plus one deploy-config file
 
-- [ ] **Step 1: Document the host rewrite in `README.md`**
+- [ ] **Step 1: Ship the rewrite rule, and document the rest**
+
+Clean paths mean a hard refresh on `/registrations` 404s on any host that does
+not rewrite unknown paths to `index.html`. Documenting that per-host is not
+enough on its own: the failure appears only in production, because Vite's dev
+server rewrites automatically. So ship the rule for the hosts that read a file,
+and document the ones that do not.
+
+Create `public/_redirects` (Vite copies `public/` to the build output verbatim):
+
+```
+/*  /index.html  200
+```
+
+Two lines, inert on every host that does not read the file, and correct on
+Netlify and Cloudflare Pages. Then add the table below, which covers the hosts
+`_redirects` cannot serve.
 
 Under **Deploying**, add:
 
@@ -2748,7 +2765,7 @@ Expected: all pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add README.md docs/manual-verification.md
+git add public/_redirects README.md docs/manual-verification.md
 git commit -m "docs: document routing, theming, and registrations"
 ```
 
