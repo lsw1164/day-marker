@@ -2507,7 +2507,7 @@ export function RegistrationRow({
 - [ ] **Step 4: Run it to verify it passes**
 
 Run: `npm test -- RegistrationRow`
-Expected: PASS — 12 tests.
+Expected: PASS — 15 tests.
 
 - [ ] **Step 5: Commit**
 
