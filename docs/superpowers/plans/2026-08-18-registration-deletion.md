@@ -2251,6 +2251,22 @@ describe('RegistrationRow — deleting and done', () => {
     expect(screen.getByRole('button', { name: COPY.deleteBusy })).toBeDisabled()
   })
 
+  it('shows progress as results land, before the run is done', () => {
+    // Task 8 streams results through onProgress, so a partly-finished delete has
+    // to render what has already landed -- it is the user's only feedback during
+    // an operation they cannot undo. A component that rendered badges only in
+    // the 'done' state would pass every other test in this file.
+    renderRow({
+      state: 'deleting',
+      results: [{ event: REG.events[0]!, outcome: 'deleted' }],
+    })
+    expect(screen.getByText(COPY.outcomeDeleted)).toBeInTheDocument()
+    // Day 100 is past AND finished, so its outcome replaces the past marker;
+    // 1 Year is past and still in flight, so it keeps one. Asserting the count
+    // pins that substitution rather than merely that both kinds of badge exist.
+    expect(screen.getAllByText(COPY.statusPast)).toHaveLength(1)
+  })
+
   it('shows an outcome per event when done', () => {
     renderRow({
       state: 'done',
