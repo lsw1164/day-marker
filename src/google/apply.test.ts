@@ -187,6 +187,29 @@ describe('applyPlan — a throwing progress callback', () => {
       applyPlan(stubApi(), [item(0, 'new')], OPTIONS, onProgress, RETRY),
     ).rejects.toThrow('render exploded')
   })
+
+  it('rejects rather than mislabel a completed write when onProgress throws', async () => {
+    // Ported from deleteRegistration.test.ts's identical regression test: this
+    // branch moved onProgress outside the try specifically so a callback that
+    // throws while handling a genuine success cannot fall into the catch below
+    // and relabel a completed insert as 'failed'. A bare `.rejects.toThrow`
+    // above cannot tell that apart from the bug it guards against, because the
+    // buggy version also rejects -- it just gets there by calling onProgress a
+    // *second* time, from inside the catch, with a fabricated failure. Assert
+    // onProgress ran exactly once, with the true 'added' outcome, before the
+    // rejection.
+    const seen: ItemResult[] = []
+    const onProgress = (result: ItemResult) => {
+      seen.push(result)
+      throw new Error('render exploded')
+    }
+    await expect(
+      applyPlan(stubApi(), [item(0, 'new')], OPTIONS, onProgress, RETRY),
+    ).rejects.toThrow('render exploded')
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.outcome).toBe('added')
+    expect(seen[0]?.error).toBeUndefined()
+  })
 })
 
 describe('applyPlan — progress', () => {

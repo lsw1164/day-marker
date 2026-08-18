@@ -208,6 +208,19 @@ describe('listEvents', () => {
     expect(String(url)).not.toContain('showDeleted')
   })
 
+  it('does not ask for expanded recurring instances', async () => {
+    // singleEvents defaults to false, and that is load-bearing, not incidental
+    // (see the long comment in calendarApi.ts). Set to true, a hand-added
+    // repeat rule on one of our events would come back as one row per
+    // occurrence instead of the recurring master, inflating a registration's
+    // count and making a delete of that id cancel a single occurrence rather
+    // than removing the registration.
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { items: [] })) as unknown as typeof fetch
+    await apiWith(fetchImpl).listEvents({ privateExtendedProperty: 'dayMarkerVersion=1' })
+    const [url] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!
+    expect(String(url)).not.toContain('singleEvents')
+  })
+
   it('maps a failure through the existing error types', async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse(401, googleError(401, 'authError')),

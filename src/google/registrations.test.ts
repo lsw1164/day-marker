@@ -10,6 +10,7 @@ import type { CalendarApi, EventListPage, GoogleEvent } from '@/google/calendarA
 import { Unauthorized } from '@/google/errors'
 import { calendarDate } from '@/domain/calendarDate'
 import { computeMilestones } from '@/domain/milestones'
+import { buildEventPayload, type EventOptions } from '@/domain/eventPayload'
 
 function ev(
   id: string,
@@ -243,6 +244,24 @@ describe('labelFor', () => {
     // renders a blank label rather than a fabricated one. Held by a test
     // rather than by memory of having ruled it.
     expect(labelFor('')).toBe('')
+  })
+})
+
+describe('DISCOVERY_FILTER', () => {
+  it('matches the dayMarkerVersion stamp buildEventPayload actually writes', () => {
+    // Cross-checked against the writer, the way labelFor's own test above
+    // cross-checks against computeMilestones: asserting the constant against
+    // itself (as the previous "queries with the discovery filter" test did)
+    // proves nothing. If dayMarkerVersion is ever bumped without updating this
+    // constant, listEvents would filter every existing registration out of
+    // its own result -- "Nothing registered yet" on a full calendar, and every
+    // one of those events silently undeletable.
+    const start = calendarDate('2025-03-14')
+    const [milestone] = computeMilestones(start, 1)
+    const options: EventOptions = { start, label: '', reminder: 'none' }
+    const stamped = buildEventPayload('dm1', milestone!, options).extendedProperties.private
+      .dayMarkerVersion
+    expect(DISCOVERY_FILTER).toBe(`dayMarkerVersion=${stamped}`)
   })
 })
 
