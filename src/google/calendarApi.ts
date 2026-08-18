@@ -29,6 +29,7 @@ export interface CalendarApi {
     privateExtendedProperty: string
     pageToken?: string
   }): Promise<EventListPage>
+  deleteEvent(id: string): Promise<'deleted' | 'alreadyGone'>
 }
 
 interface GoogleErrorBody {
@@ -136,6 +137,15 @@ export function createCalendarApi(
         const body = (await response.json()) as Partial<EventListPage>
         return { items: body.items ?? [], nextPageToken: body.nextPageToken }
       }
+      const { reason, detail } = await readError(response)
+      throw toError(response.status, reason, detail)
+    },
+    async deleteEvent(id) {
+      const response = await request(`${EVENTS_URL}/${id}`, 'DELETE')
+      if (response.ok) return 'deleted'
+      // 404: never existed or fully purged. 410: existed, already deleted. Both
+      // mean the end state we wanted already holds.
+      if (response.status === 404 || response.status === 410) return 'alreadyGone'
       const { reason, detail } = await readError(response)
       throw toError(response.status, reason, detail)
     },

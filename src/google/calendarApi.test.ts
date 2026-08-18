@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createCalendarApi, EVENTS_URL } from '@/google/calendarApi'
-import { Conflict, NotFound, RateLimited, ServerError, Unauthorized, isRetryable } from '@/google/errors'
+import {
+  AlreadyGone,
+  Conflict,
+  NotFound,
+  RateLimited,
+  ServerError,
+  Unauthorized,
+  isRetryable,
+} from '@/google/errors'
 import type { GoogleEventPayload } from '@/domain/eventPayload'
 import { calendarDate } from '@/domain/calendarDate'
 
@@ -208,5 +216,53 @@ describe('listEvents', () => {
     await expect(
       apiWith(fetchImpl).listEvents({ privateExtendedProperty: 'dayMarkerVersion=1' }),
     ).rejects.toBeInstanceOf(Unauthorized)
+  })
+})
+
+describe('deleteEvent', () => {
+  it('DELETEs the event', async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 })) as unknown as typeof fetch
+    const outcome = await apiWith(fetchImpl).deleteEvent('dmabc12')
+    const [url, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!
+    expect(url).toBe(`${EVENTS_URL}/dmabc12`)
+    expect((init as RequestInit).method).toBe('DELETE')
+    expect(outcome).toBe('deleted')
+  })
+
+  it('sends no body or Content-Type', async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 })) as unknown as typeof fetch
+    await apiWith(fetchImpl).deleteEvent('dmabc12')
+    const [, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!
+    expect((init as RequestInit).body).toBeUndefined()
+    expect(new Headers((init as RequestInit).headers).get('Content-Type')).toBeNull()
+  })
+
+  it.each([404, 410])('reports %i as already gone, not a failure', async (status) => {
+    // The user deleted this by hand. Nothing is broken, so calling it a failure
+    // would send them hunting a problem that does not exist.
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(status, googleError(status, 'notFound')),
+    ) as unknown as typeof fetch
+    await expect(apiWith(fetchImpl).deleteEvent('dmabc12')).resolves.toBe('alreadyGone')
+  })
+
+  it('still throws on a real failure', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(401, googleError(401, 'authError')),
+    ) as unknown as typeof fetch
+    await expect(apiWith(fetchImpl).deleteEvent('dmabc12')).rejects.toBeInstanceOf(Unauthorized)
+  })
+
+  it('treats a rate limit as retryable, exactly as writes do', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(429, googleError(429, 'rateLimitExceeded')),
+    ) as unknown as typeof fetch
+    await expect(apiWith(fetchImpl).deleteEvent('dmabc12')).rejects.toBeInstanceOf(RateLimited)
+  })
+})
+
+describe('AlreadyGone', () => {
+  it('is not retryable — there is nothing left to retry', () => {
+    expect(isRetryable(new AlreadyGone(410, 'deleted', ''))).toBe(false)
   })
 })
