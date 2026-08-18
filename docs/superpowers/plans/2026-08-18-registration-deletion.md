@@ -2294,14 +2294,15 @@ describe('RegistrationRow — deleting and done', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('boom')
   })
 
-  it('offers to reconnect when the run halted, rather than showing the raw 401', () => {
-    // The first failure is always the real 401, because mapWithLimit claims
-    // indices in increasing order -- so selecting on `outcome === 'failed'` would
-    // render "Google Calendar API 401 (authError)" and never the actionable copy.
+  it('offers to reconnect when the run halted, rather than showing a raw error', () => {
+    // deleteRegistration stamps DELETE_HALTED on every failed result once a run
+    // halts -- the item that hit the 401 as well as the ones never attempted --
+    // so the sentinel, not a raw Google string, is what a halted run produces.
+    // The raw-error path stays covered by the done-state test asserting 'boom'.
     renderRow({
       state: 'done',
       results: [
-        { event: REG.events[0]!, outcome: 'failed', error: 'Google Calendar API 401 (authError)' },
+        { event: REG.events[0]!, outcome: 'failed', error: DELETE_HALTED },
         { event: REG.events[1]!, outcome: 'failed', error: DELETE_HALTED },
         { event: REG.events[2]!, outcome: 'failed', error: DELETE_HALTED },
       ],
@@ -2431,7 +2432,13 @@ export function RegistrationRow({
             sees the past events they had forgotten; an "and N more" would hide
             precisely those.
           */}
-          <ul className="mt-3 max-h-56 overflow-y-auto border-t pt-2 text-sm">
+          {/*
+            tabIndex makes the list reachable by keyboard alone. Without it a
+            sighted keyboard-only user cannot scroll a long registration's
+            events into view, which defeats the one thing this step exists for.
+            No interactive children, so there is nothing to trap.
+          */}
+          <ul tabIndex={0} className="mt-3 max-h-56 overflow-y-auto border-t pt-2 text-sm">
             {registration.events.map((event) => {
               const result = byId.get(event.id)
               const past = event.date < todayDate
