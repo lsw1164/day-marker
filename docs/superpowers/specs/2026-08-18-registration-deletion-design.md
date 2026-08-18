@@ -159,7 +159,7 @@ derives:
 | Field | Source |
 |---|---|
 | `startDate` | `extendedProperties.private.startDate` — the registration key |
-| `title` | the first event's `summary`; if absent, the formatted `startDate` |
+| `title` | the **earliest-dated** event's `summary`; if absent, the formatted `startDate`. Not first-in-response order: `events.list` sets no `orderBy`, so that would let one registration rename itself between loads |
 | `count` | number of events in the group |
 | `events` | id, milestone label (from `milestoneKey`), and date, sorted by date |
 
