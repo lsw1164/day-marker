@@ -2251,6 +2251,21 @@ describe('RegistrationRow — deleting and done', () => {
     expect(screen.getByText(COPY.outcomeDeleted)).toBeInTheDocument()
     expect(screen.getByText(COPY.outcomeAlreadyGone)).toBeInTheDocument()
     expect(screen.getByText(COPY.outcomeFailed)).toBeInTheDocument()
+    // The reason, not just the badge. A halted run reports every unattempted
+    // event as `failed`, so the count alone cannot tell a user whether their
+    // registration is half-deleted or untouched.
+    expect(screen.getByRole('alert')).toHaveTextContent('boom')
+  })
+
+  it('says nothing extra when every event succeeded', () => {
+    renderRow({
+      state: 'done',
+      results: [
+        { event: REG.events[0]!, outcome: 'deleted' },
+        { event: REG.events[1]!, outcome: 'alreadyGone' },
+      ],
+    })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('summarises already-gone separately from failed', () => {
@@ -2315,6 +2330,7 @@ export function RegistrationRow({
   const deleted = results.filter((r) => r.outcome === 'deleted').length
   const alreadyGone = results.filter((r) => r.outcome === 'alreadyGone').length
   const failed = results.filter((r) => r.outcome === 'failed').length
+  const firstFailure = results.find((r) => r.outcome === 'failed')?.error
 
   return (
     <li
@@ -2374,9 +2390,26 @@ export function RegistrationRow({
           </ul>
 
           {state === 'done' ? (
-            <p className="mt-3 text-sm font-medium">
-              {COPY.deleteSummary(deleted, alreadyGone, failed)}
-            </p>
+            <>
+              <p className="mt-3 text-sm font-medium">
+                {COPY.deleteSummary(deleted, alreadyGone, failed)}
+              </p>
+              {/*
+                One Alert carrying the first failure's reason, matching
+                ResultSummary's `error ?? failed[0]?.error`. Without it a run
+                halted by an expired token shows `Failed` badges and a bare count,
+                with nothing saying the events were never attempted or that
+                reconnecting is what fixes it — deleteRegistration stamps those
+                items with DELETE_HALTED_MESSAGE precisely so it can be read.
+                Cannot collide with the confirming Alert above: that one is gated
+                on `state === 'confirming'`, which this branch excludes.
+              */}
+              {firstFailure && (
+                <Alert variant="destructive" className="mt-3">
+                  <AlertDescription>{firstFailure}</AlertDescription>
+                </Alert>
+              )}
+            </>
           ) : (
             <div className="mt-3 flex gap-2">
               <Button
