@@ -117,6 +117,18 @@ export function RegistrationsPage({
           <AlertDescription>{state.error}</AlertDescription>
         </Alert>
       )}
+      {listView === 'blocked' && (
+        // Adjacent to the Alert above rather than lower on the page: some of
+        // its copy (paginationLooped's "Please try again") is an instruction
+        // with nothing behind it otherwise -- a full browser reload was the
+        // only way to act on it before this. Not shown while a retry is
+        // already in flight: listView reads 'loading' then, not 'blocked',
+        // since a fresh fetch always takes priority (see the listView
+        // derivation above).
+        <Button variant="outline" className="min-h-11" onClick={() => state.refresh()}>
+          {COPY.listRetry}
+        </Button>
+      )}
 
       {!state.connected ? (
         <>

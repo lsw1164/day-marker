@@ -22,6 +22,10 @@ export const COPY = {
     'Connect your Google account to see what Day Marker has registered.',
   registrationsLoading: 'Looking through your calendar…',
   registrationsEmpty: 'Nothing registered yet. Add an anniversary to see it here.',
+  // The affordance a failed listing needs so its own error text -- including
+  // paginationLooped's "Please try again" -- is not an instruction with
+  // nothing behind it.
+  listRetry: 'Try again',
   registrationsCount: (n: number) =>
     n === 1 ? '1 registration' : `${n} registrations`,
   registrationMeta: (start: string, n: number) =>

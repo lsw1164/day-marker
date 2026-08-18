@@ -133,6 +133,19 @@ describe('RegistrationsPage', () => {
     expect(screen.queryByText(COPY.registrationsEmpty)).not.toBeInTheDocument()
   })
 
+  it('offers a retry after a failed load, which re-lists on success', async () => {
+    const d = deps(TWO)
+    const listEvents = d.api.listEvents as ReturnType<typeof vi.fn>
+    listEvents.mockRejectedValueOnce(new Error('list exploded'))
+    render(<RegistrationsPage deps={d} checkGisReady={ready} todayDate={TODAY} />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('list exploded')
+    const retry = screen.getByRole('button', { name: COPY.listRetry })
+    await userEvent.click(retry)
+    expect(listEvents).toHaveBeenCalledTimes(2)
+    expect(await screen.findByText(TITLE_A)).toBeInTheDocument()
+    expect(await screen.findByText(TITLE_B)).toBeInTheDocument()
+  })
+
   it('shows exactly one alert while confirming a delete', async () => {
     // The confirm warning is itself an alert, so a stray page-level alert would
     // make every getByRole('alert') query ambiguous.
