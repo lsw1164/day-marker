@@ -18,12 +18,6 @@ export class Conflict extends ApiError {}
 export class NotFound extends ApiError {}
 /** 5xx. Retryable. */
 export class ServerError extends ApiError {}
-/**
- * The event is already gone — someone deleted it by hand. Distinct from NotFound
- * because on the delete path this is a SUCCESS: the desired end state already
- * holds. `isRetryable` returns false for it, since there is nothing to retry.
- */
-export class AlreadyGone extends ApiError {}
 
 export function isRetryable(error: unknown): boolean {
   if (error instanceof RateLimited || error instanceof ServerError) return true

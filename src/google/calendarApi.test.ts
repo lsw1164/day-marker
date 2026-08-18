@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createCalendarApi, EVENTS_URL } from '@/google/calendarApi'
 import {
-  AlreadyGone,
   Conflict,
   NotFound,
   RateLimited,
@@ -258,11 +257,5 @@ describe('deleteEvent', () => {
       jsonResponse(429, googleError(429, 'rateLimitExceeded')),
     ) as unknown as typeof fetch
     await expect(apiWith(fetchImpl).deleteEvent('dmabc12')).rejects.toBeInstanceOf(RateLimited)
-  })
-})
-
-describe('AlreadyGone', () => {
-  it('is not retryable — there is nothing left to retry', () => {
-    expect(isRetryable(new AlreadyGone(410, 'deleted', ''))).toBe(false)
   })
 })

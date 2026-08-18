@@ -47,7 +47,6 @@ src/
     copy.ts                    + nav, theme, registrations, delete keys
   google/
     calendarApi.ts             + listEvents (paginated), deleteEvent; GoogleEvent extended
-    errors.ts                  + AlreadyGone
     registrations.ts           groupByStartDate, listRegistrations, deleteRegistration
 ```
 
@@ -1008,7 +1007,7 @@ git commit -m "feat(google): list events by private property, paginated"
 
 ---
 
-### Task 4: `deleteEvent`, and `AlreadyGone` as a success
+### Task 4: `deleteEvent`, with already-gone as a success
 
 **Files:**
 - Modify: `src/google/errors.ts`
@@ -1039,8 +1038,16 @@ to `string` and fails to satisfy `Promise<'deleted' | 'alreadyGone'>`.
 **Interfaces:**
 - Consumes: the existing error classes
 - Produces:
-  - `class AlreadyGone extends ApiError`
   - `deleteEvent(id: string): Promise<'deleted' | 'alreadyGone'>` on `CalendarApi`
+
+**Do NOT add an `AlreadyGone` error class.** An earlier draft of this task did,
+and it was removed: `deleteEvent` intercepts 404 and 410 before `toError` is
+ever reached, so nothing could construct it, and the spec's mechanism for this
+outcome is the `alreadyGone` string in the return union — which is what Task 7
+and the `COPY.outcomeAlreadyGone` label actually consume. It also duplicated the
+existing `NotFound` (404) and its doc comment claimed `isRetryable` treated it
+specially when in fact `isRetryable` returns false for every class outside its
+allowlist. See the ruling in the ledger.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1088,35 +1095,19 @@ describe('deleteEvent', () => {
     await expect(apiWith(fetchImpl).deleteEvent('dmabc12')).rejects.toBeInstanceOf(RateLimited)
   })
 })
-
-describe('AlreadyGone', () => {
-  it('is not retryable — there is nothing left to retry', () => {
-    expect(isRetryable(new AlreadyGone(410, 'deleted', ''))).toBe(false)
-  })
-})
 ```
 
-Add `AlreadyGone` to the `@/google/errors` import at the top of the file.
+The existing `@/google/errors` import needs no new members.
 
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `npm test -- calendarApi`
-Expected: FAIL — `deleteEvent is not a function` and an unresolved `AlreadyGone` import.
+Expected: FAIL — `deleteEvent is not a function`.
 
-- [ ] **Step 3: Add the error class**
+- [ ] **Step 3: No error class is needed**
 
-In `src/google/errors.ts`, after `NotFound`:
-
-```ts
-/**
- * The event is already gone — someone deleted it by hand. Distinct from NotFound
- * because on the delete path this is a SUCCESS: the desired end state already
- * holds. `isRetryable` returns false for it, since there is nothing to retry.
- */
-export class AlreadyGone extends ApiError {}
-```
-
-`isRetryable` needs no change: it returns true only for `RateLimited`, `ServerError`, and a bare `TypeError`, so a new `ApiError` subclass is non-retryable by default. The test above pins that.
+`src/google/errors.ts` is unchanged by this task. The already-gone outcome
+travels in `deleteEvent`'s return union, not as a thrown class.
 
 - [ ] **Step 4: Add `deleteEvent` to the interface and implement it**
 
@@ -1140,7 +1131,7 @@ Add to the returned object in `createCalendarApi`:
     },
 ```
 
-Note `deleteEvent` returns its own outcome rather than throwing `AlreadyGone`. The class exists so `toError` has somewhere to map those statuses if a future caller wants the throwing shape, and so `isRetryable`'s treatment of it is pinned; the delete path itself never needs to catch.
+Note `deleteEvent` returns its own outcome rather than throwing. 404 and 410 are intercepted here, before `toError`, because on a delete they mean the desired end state already holds — the caller asked for the event to be gone and it is. Every other status keeps the existing mapping, so a 401 still halts a run and a 429 is still retried.
 
 - [ ] **Step 5: Run it to verify it passes**
 
