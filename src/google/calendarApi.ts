@@ -120,6 +120,17 @@ export function createCalendarApi(
       if (pageToken) url.searchParams.set('pageToken', pageToken)
       // showDeleted is deliberately left at its default of false: a cancelled
       // event must not appear in a list of what is currently registered.
+      //
+      // singleEvents is likewise left at its default of false, and that is load
+      // bearing rather than incidental. Day Marker never writes a `recurrence`
+      // field, so this changes nothing today -- but a user can add a repeat rule
+      // to one of our events by hand in the Calendar UI. Left at false we get
+      // the recurring master, once, carrying our stamps and our deterministic
+      // id, and deleting that id removes the whole series. Set to true we would
+      // instead get one instance per occurrence, all carrying the same inherited
+      // stamps, so the registrations list would show a milestone many times over
+      // and deleting an instance id would cancel a single occurrence rather than
+      // the registration. Do not "fix" this by asking for expanded instances.
       const response = await request(url.toString(), 'GET')
       if (response.ok) {
         const body = (await response.json()) as Partial<EventListPage>
