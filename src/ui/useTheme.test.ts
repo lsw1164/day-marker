@@ -120,6 +120,19 @@ describe('useTheme', () => {
     expect(document.documentElement.classList.contains('dark')).toBe(false)
   })
 
+  it('falls back to system for a corrupt stored value, rather than an unknown choice', () => {
+    // themeScript.test.ts pins this same case for the inline pre-paint
+    // script; nothing pinned it for the hook. Without the 'dark' | 'light'
+    // whitelist, a corrupt localStorage value flows straight through to
+    // `choice`, and a component indexing an icon map by `choice` (Header)
+    // crashes on the unrecognised key.
+    localStorage.setItem(THEME_KEY, 'blue')
+    fakeMedia(true)
+    const { result } = renderHook(() => useTheme())
+    expect(result.current.choice).toBe('system')
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+  })
+
   it('follows the OS when localStorage throws, as in private browsing', () => {
     fakeMedia(true)
     const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {

@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import indexHtml from '../../index.html?raw'
-
-const THEME_KEY = 'dayMarker.theme'
+// Imported, not redeclared: a local `const THEME_KEY = 'dayMarker.theme'` here
+// ties nothing to the key useTheme's hook actually reads, so a change to that
+// constant would leave the pre-paint script and the hook reading two
+// different localStorage keys -- a flash of the wrong theme on every load,
+// the exact bug this script exists to prevent -- with every test in this file
+// still green.
+import { THEME_KEY } from '@/ui/useTheme'
 
 /** Installs a controllable matchMedia, mirroring the helper in useTheme.test.ts. */
 function fakeMedia(initialDark: boolean) {
