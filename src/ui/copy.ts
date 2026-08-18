@@ -1,6 +1,7 @@
 import type { ReminderPreset } from '@/domain/reminders'
 import type { ItemOutcome } from '@/google/apply'
 import type { PlanItem, PlanStatus } from '@/google/plan'
+import type { ThemeChoice } from '@/ui/useTheme'
 
 export const COPY = {
   appName: 'Day Marker',
@@ -8,13 +9,13 @@ export const COPY = {
   navLabel: 'Sections',
   navNew: 'New',
   navRegistrations: 'Registrations',
-  themeLabel: (choice: 'system' | 'light' | 'dark') =>
+  themeLabel: (choice: ThemeChoice) =>
     choice === 'system'
       ? 'Theme: following your system'
       : choice === 'light'
         ? 'Theme: light'
         : 'Theme: dark',
-  themeAction: (next: 'system' | 'light' | 'dark') =>
+  themeAction: (next: ThemeChoice) =>
     next === 'system' ? 'Switch to system theme' : `Switch to ${next} theme`,
   registrationsTitle: 'Registrations',
   registrationsConnectPrompt:
