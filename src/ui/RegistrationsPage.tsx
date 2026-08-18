@@ -56,7 +56,12 @@ export function RegistrationsPage({
   function focusRowControl(startDate: CalendarDate | null) {
     if (startDate === null) return
     const index = state.registrations.findIndex((r) => r.startDate === startDate)
-    const row = listRef.current?.querySelectorAll('li')[index]
+    // :scope > li rather than a bare 'li': the open row's own per-event <li>s
+    // are also descendants of this <ul>, and a plain querySelectorAll would
+    // pick those up too. Correct today only because exactly one row is ever
+    // open and its own <li> sorts before its nested items in document order --
+    // scoping to direct children removes the dependence on that coincidence.
+    const row = listRef.current?.querySelectorAll(':scope > li')[index]
     // Whichever button a row shows first -- Cancel while open, Delete… while
     // closed -- is always the one this needs: RegistrationRow never renders
     // more than one button ahead of it in either state.
@@ -188,6 +193,21 @@ export function RegistrationsPage({
       {showPageError && (
         <Alert variant="destructive">
           <AlertDescription>{state.error}</AlertDescription>
+        </Alert>
+      )}
+      {/*
+        Mirrors App's identical gisReady === false alert: this page copied the
+        tri-state and the Connect button's `disabled={gisReady !== true}` guard
+        but not the explanation, so an ad-blocked user on this deep link got a
+        permanently disabled button next to prose naming an action it cannot
+        perform, and no alert at all. Gated on !showPageError, not merely on
+        !state.connected, so this can never coexist with the page-error Alert
+        above -- getByRole('alert') throws on more than one match, and several
+        tests depend on there being exactly one.
+      */}
+      {!state.connected && gisReady === false && !showPageError && (
+        <Alert variant="destructive">
+          <AlertDescription>{COPY.scriptBlocked}</AlertDescription>
         </Alert>
       )}
       {state.connected && listView === 'blocked' && (

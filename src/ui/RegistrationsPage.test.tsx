@@ -73,6 +73,22 @@ describe('RegistrationsPage', () => {
     expect(screen.getByText(COPY.registrationsConnectPrompt)).toBeInTheDocument()
   })
 
+  it('explains why Connect is disabled when the Google script never loads', async () => {
+    // This page is a deep link, expected to be opened cold -- exactly where a
+    // permanently-disabled Connect button with no explanation lands hardest.
+    render(
+      <RegistrationsPage
+        deps={deps([], null)}
+        checkGisReady={async () => false}
+        todayDate={TODAY}
+      />,
+    )
+    expect(await screen.findByRole('alert')).toHaveTextContent(COPY.scriptBlocked)
+    expect(screen.getByRole('button', { name: COPY.connect })).toBeDisabled()
+    // Single-alert invariant: this must never coexist with the page-error Alert.
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+  })
+
   it('lists both registrations, each attributed to its own title and count', async () => {
     render(<RegistrationsPage deps={deps(TWO)} checkGisReady={ready} todayDate={TODAY} />)
     const rowA = await rowFor(TITLE_A)
@@ -276,5 +292,24 @@ describe('RegistrationsPage', () => {
     backButton.blur()
     fireEvent.click(backButton)
     expect(await screen.findByRole('button', { name: COPY.connect })).toHaveFocus()
+  })
+
+  it('shows the generic heading, not a stale count, after a halted disconnect', async () => {
+    // disconnectAfterHalt clears confirming/results/connected but deliberately
+    // leaves the stale `registrations` array in state (RegistrationsPage's
+    // !connected branch hides it regardless) -- so the heading's count must
+    // stay gated on `connected`, or a halted disconnect would render "2
+    // registrations" directly above the connect prompt.
+    const d = deps(TWO)
+    ;(d.api.deleteEvent as ReturnType<typeof vi.fn>).mockRejectedValue(new Unauthorized(401, 'authError', ''))
+    render(<RegistrationsPage deps={d} checkGisReady={ready} todayDate={TODAY} />)
+    const rowB = await rowFor(TITLE_B)
+    await userEvent.click(within(rowB).getByRole('button', { name: COPY.deleteOpen }))
+    await userEvent.click(within(rowB).getByRole('button', { name: COPY.deleteConfirm(2) }))
+    const backButton = await screen.findByRole('button', { name: COPY.deleteBack })
+    await userEvent.click(backButton)
+    expect(await screen.findByText(COPY.registrationsConnectPrompt)).toBeInTheDocument()
+    expect(screen.getByText(COPY.registrationsTitle)).toBeInTheDocument()
+    expect(screen.queryByText(COPY.registrationsCount(2))).not.toBeInTheDocument()
   })
 })
