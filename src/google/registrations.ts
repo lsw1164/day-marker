@@ -12,7 +12,7 @@ export const DISCOVERY_FILTER = 'dayMarkerVersion=1'
  * message: `ui/` maps this sentinel to user copy, the same way it maps
  * MISSING_CLIENT_ID, so that user-facing strings stay out of the google layer.
  */
-export const PAGINATION_LOOPED = 'PAGINATION_LOOPED'
+export const PAGINATION_LOOPED = 'pagination_looped'
 
 export interface RegistrationEvent {
   id: string
