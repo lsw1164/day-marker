@@ -486,6 +486,40 @@ describe('useRegistrations', () => {
     expect(result.current.connected).toBe(false)
   })
 
+  it('clears results and resets phase to ready when beginConfirm retargets a non-halted done', async () => {
+    // Task 9's 'done' branch computes deleted/alreadyGone/failed with
+    // results.filter(...) over the whole array -- not keyed by event id --
+    // so the first registration's counts would otherwise render under the
+    // second one today, not merely in some future aggregate. And leaving
+    // phase at 'done' would make Task 10's row-state mapper render the newly
+    // active row as 'done' too: no Cancel/Confirm buttons, a dead end only
+    // escapable via backToList, which would discard this very retarget.
+    const d = deps()
+    ;(d.api.listEvents as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [
+        ev('a', '2025-03-14', 'd100', '2025-06-21'),
+        ev('b', '2025-03-14', 'y1', '2026-03-14'),
+        ev('c', '2020-01-01', 'y1', '2021-01-01'),
+      ],
+    })
+    const { result } = renderHook(() => useRegistrations(d))
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+    act(() => result.current.beginConfirm(calendarDate('2025-03-14')))
+    await act(async () => {
+      await result.current.confirmDelete()
+    })
+    expect(result.current.phase).toBe('done')
+    expect(result.current.results).toHaveLength(2)
+
+    act(() => result.current.beginConfirm(calendarDate('2020-01-01')))
+    expect(result.current.confirming).toBe('2020-01-01')
+    expect(result.current.results).toEqual([])
+    // 'ready' is what Task 10's mapper treats as "neither deleting nor
+    // done" -- the value that makes the newly active row render
+    // 'confirming' rather than getting stuck showing a stale 'done'.
+    expect(result.current.phase).toBe('ready')
+  })
+
   it('does not reload on every render when the caller rebuilds api/auth fresh each render', async () => {
     // Task 10 calls useRegistrations({ auth: deps.auth, api: deps.api,
     // retryDeps: deps.retryDeps }) as a fresh object literal inside its

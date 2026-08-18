@@ -164,9 +164,9 @@ export function useRegistrations({ auth, api, retryDeps }: RegistrationsDeps) {
   const beginConfirm = useCallback(
     (startDate: CalendarDate) => {
       // A delete in flight owns the screen. Retargeting `confirming` would drop
-      // the running row back to its list state, and since results are matched
-      // by event id, its outcomes would then render against no row at all --
-      // the user would lose every trace of a deletion they cannot undo.
+      // the running row back to its list state while its own delete is still
+      // running -- the user would lose every trace of a deletion they cannot
+      // undo.
       if (deletingRef.current) return
       // The same loss reached a different way: deletingRef is false again by
       // 'done', but if that finished run halted, its summary is the only
@@ -179,6 +179,22 @@ export function useRegistrations({ auth, api, retryDeps }: RegistrationsDeps) {
         disconnectAfterHalt()
         return
       }
+      // A non-halted 'done' still needs clearing before retargeting, on two
+      // counts. Task 9's 'done' branch computes deleted/alreadyGone/failed
+      // with `results.filter(...)` over the whole array -- not keyed by
+      // event id at all -- so leaving `results` in place would render the
+      // abandoned run's counts under the newly active row today, not merely
+      // in some hypothetical future aggregate. And leaving `phase` at 'done'
+      // would make Task 10's row-state mapper (`state.phase === 'deleting' ?
+      // 'deleting' : state.phase === 'done' ? 'done' : 'confirming'') render
+      // the newly active row as 'done' too -- no Cancel or Confirm buttons,
+      // a dead end escapable only via backToList, which would then discard
+      // this very retarget. 'ready' is the value that mapper treats as
+      // "neither deleting nor done", which is what is actually true here:
+      // the list in hand is still the one already loaded, just now aimed at
+      // a different row.
+      setResults([])
+      setPhase('ready')
       setConfirming(startDate)
     },
     [phase, results, disconnectAfterHalt],
