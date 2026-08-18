@@ -20,6 +20,39 @@ export const COPY = {
   registrationsTitle: 'Registrations',
   registrationsConnectPrompt:
     'Connect your Google account to see what Day Marker has registered.',
+  registrationsLoading: 'Looking through your calendar…',
+  registrationsEmpty: 'Nothing registered yet. Add an anniversary to see it here.',
+  registrationsCount: (n: number) =>
+    n === 1 ? '1 registration' : `${n} registrations`,
+  registrationMeta: (start: string, n: number) =>
+    `Started ${start} · ${n === 1 ? '1 event' : `${n} events`}`,
+  deleteOpen: 'Delete…',
+  deleteWarning: (n: number) =>
+    `Removes ${n === 1 ? '1 event' : `${n} events`} from your calendar. Day Marker cannot undo this.`,
+  deleteCancel: 'Cancel',
+  deleteConfirm: (n: number) => `Delete ${n}`,
+  deleteBusy: 'Deleting…',
+  deleteBack: 'Back to registrations',
+  outcomeDeleted: 'Deleted',
+  outcomeAlreadyGone: 'Already gone',
+  outcomeFailed: 'Failed',
+  // Google handed back a page token it had already served. Rare, and not the
+  // user's doing, so say what to do rather than what went wrong.
+  paginationLooped: 'Your calendar list did not load correctly. Please try again.',
+  // Shown when a delete run stopped early because the token died. Says what to do,
+  // and deliberately does not claim the remaining events are still there -- a
+  // failed DELETE deletes nothing, but a lost response is indistinguishable from
+  // one that landed, so the copy must not promise either way.
+  deleteHalted:
+    'Your Google connection expired before every event was deleted. Reconnect, then delete again.',
+  deleteSummary: (deleted: number, alreadyGone: number, failed: number) =>
+    [
+      `${deleted} deleted`,
+      alreadyGone > 0 ? `${alreadyGone} already gone` : null,
+      failed > 0 ? `${failed} failed` : null,
+    ]
+      .filter(Boolean)
+      .join(' · '),
 
   notConnected: 'Not connected',
   connected: 'Connected',
