@@ -8,6 +8,14 @@ export const COPY = {
   navLabel: 'Sections',
   navNew: 'New',
   navRegistrations: 'Registrations',
+  themeLabel: (choice: 'system' | 'light' | 'dark') =>
+    choice === 'system'
+      ? 'Theme: following your system'
+      : choice === 'light'
+        ? 'Theme: light'
+        : 'Theme: dark',
+  themeAction: (next: 'system' | 'light' | 'dark') =>
+    next === 'system' ? 'Switch to system theme' : `Switch to ${next} theme`,
   registrationsTitle: 'Registrations',
   registrationsConnectPrompt:
     'Connect your Google account to see what Day Marker has registered.',

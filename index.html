@@ -5,6 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Day Marker</title>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script>
+      // Runs before first paint. Doing this in React would show a flash of the
+      // wrong theme on every load. One mechanism (the class), two sources: a
+      // stored choice if there is one, the OS otherwise.
+      ;(function () {
+        try {
+          var stored = localStorage.getItem('dayMarker.theme')
+          var dark =
+            stored === 'dark' ||
+            (stored !== 'light' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          if (dark) document.documentElement.classList.add('dark')
+        } catch (e) {
+          // Private browsing can throw on localStorage. Falling back to light is
+          // better than failing to render.
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
