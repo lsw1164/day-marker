@@ -7,7 +7,9 @@ import {
   type Auth,
 } from '@/google/auth'
 import type { CalendarApi } from '@/google/calendarApi'
+import { Unauthorized } from '@/google/errors'
 import {
+  DELETE_HALTED,
   deleteRegistration,
   listRegistrations,
   PAGINATION_LOOPED,
@@ -34,6 +36,11 @@ function describeError(error: unknown): string {
   // user-facing strings stay in ui/ and the google layer never imports COPY.
   if (message === PAGINATION_LOOPED) return COPY.paginationLooped
   return message
+}
+
+/** True once a finished run's `results` include an unattempted, halted event. */
+function isHaltedRun(results: DeleteResult[]): boolean {
+  return results.some((r) => r.error === DELETE_HALTED)
 }
 
 export function useRegistrations({ auth, api, retryDeps }: RegistrationsDeps) {
@@ -101,6 +108,17 @@ export function useRegistrations({ auth, api, retryDeps }: RegistrationsDeps) {
         setRegistrations([])
         setError(describeError(e))
         setPhase('idle')
+        // Only an auth failure invalidates the session. A 500, or
+        // PAGINATION_LOOPED, is worth retrying with the token we have -- and
+        // PAGINATION_LOOPED's own copy says "please try again", which would
+        // be a lie if this had just signed the user out. This deliberately
+        // diverges from useDayMarker, which disconnects on any probe
+        // failure: that hook has no non-auth failure mode whose copy
+        // contradicts being disconnected, and this one does.
+        if (e instanceof Unauthorized) {
+          setConnected(false)
+          authRef.current.clear()
+        }
       }
     })()
     // api and auth are intentionally absent -- see the apiRef/authRef note above.
@@ -129,14 +147,42 @@ export function useRegistrations({ auth, api, retryDeps }: RegistrationsDeps) {
 
   const refresh = useCallback(() => setLoadNonce((n) => n + 1), [])
 
-  const beginConfirm = useCallback((startDate: CalendarDate) => {
-    // A delete in flight owns the screen. Retargeting `confirming` would drop
-    // the running row back to its list state, and since results are matched
-    // by event id, its outcomes would then render against no row at all --
-    // the user would lose every trace of a deletion they cannot undo.
-    if (deletingRef.current) return
-    setConfirming(startDate)
+  /**
+   * The token died mid-run. Drops straight to the connect prompt so the user
+   * can reconnect and finish the remainder, which is what COPY.deleteHalted
+   * tells them to do -- and clears `confirming`/`results` on the way out,
+   * though RegistrationsPage's `!connected` branch would hide them regardless
+   * the instant `connected` flips.
+   */
+  const disconnectAfterHalt = useCallback(() => {
+    setConfirming(null)
+    setResults([])
+    setConnected(false)
+    authRef.current.clear()
   }, [])
+
+  const beginConfirm = useCallback(
+    (startDate: CalendarDate) => {
+      // A delete in flight owns the screen. Retargeting `confirming` would drop
+      // the running row back to its list state, and since results are matched
+      // by event id, its outcomes would then render against no row at all --
+      // the user would lose every trace of a deletion they cannot undo.
+      if (deletingRef.current) return
+      // The same loss reached a different way: deletingRef is false again by
+      // 'done', but if that finished run halted, its summary is the only
+      // thing offering the reconnect COPY.deleteHalted promises. Task 10
+      // renders every other row's Delete… button live even while the active
+      // row shows a halted 'done', so retargeting here must not be allowed to
+      // quietly discard it -- route to the same reconnect flow backToList
+      // uses instead of switching rows.
+      if (phase === 'done' && isHaltedRun(results)) {
+        disconnectAfterHalt()
+        return
+      }
+      setConfirming(startDate)
+    },
+    [phase, results, disconnectAfterHalt],
+  )
 
   const cancelConfirm = useCallback(() => {
     if (deletingRef.current) return
@@ -182,12 +228,27 @@ export function useRegistrations({ auth, api, retryDeps }: RegistrationsDeps) {
   }, [registrations, confirming, retryDeps])
 
   const backToList = useCallback(() => {
+    // Same hazard beginConfirm/cancelConfirm are already guarded against:
+    // clearing `confirming` while its delete is still running would drop the
+    // active row back to 'list' and orphan its in-progress results. Not
+    // reachable through Task 10's planned UI today -- its only caller renders
+    // solely once phase is 'done' -- but the hook's own contract should not
+    // depend on that staying true.
+    if (deletingRef.current) return
+    if (isHaltedRun(results)) {
+      // The token died mid-run. Refreshing would just requery with a token
+      // already known dead and 401 immediately; drop to the connect prompt
+      // instead so the user can reconnect and finish the remainder, which is
+      // what COPY.deleteHalted tells them to do.
+      disconnectAfterHalt()
+      return
+    }
     setConfirming(null)
     setResults([])
     // The list in hand is stale — the events just deleted are gone — so re-read
     // rather than reusing a grouping that no longer describes the calendar.
     refresh()
-  }, [refresh])
+  }, [results, refresh, disconnectAfterHalt])
 
   return {
     phase,

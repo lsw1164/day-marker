@@ -4,6 +4,7 @@ import { useRegistrations, type RegistrationsDeps } from '@/ui/useRegistrations'
 import type { Auth } from '@/google/auth'
 import type { CalendarApi, GoogleEvent } from '@/google/calendarApi'
 import { Unauthorized } from '@/google/errors'
+import { DELETE_HALTED } from '@/google/registrations'
 import { calendarDate } from '@/domain/calendarDate'
 import { COPY } from '@/ui/copy'
 import type { RetryDeps } from '@/lib/backoff'
@@ -75,6 +76,23 @@ describe('useRegistrations', () => {
     const { result } = renderHook(() => useRegistrations(d))
     await waitFor(() => expect(result.current.error).toBeTruthy())
     expect(result.current.registrations).toEqual([])
+  })
+
+  it('flips connected to false after an Unauthorized load failure', async () => {
+    // The token died; nothing further can be read with it, so the connect
+    // prompt -- not a silent error banner over an empty list -- is the honest
+    // next screen. useDayMarker does this on any probe failure; this hook
+    // only does it for an auth failure specifically, because PAGINATION_LOOPED
+    // is a real non-auth failure mode here and its own copy says "please try
+    // again", which would be a lie if this had just signed the user out.
+    const d = deps()
+    ;(d.api.listEvents as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Unauthorized(401, 'authError', ''),
+    )
+    const { result } = renderHook(() => useRegistrations(d))
+    await waitFor(() => expect(result.current.error).toBeTruthy())
+    expect(result.current.connected).toBe(false)
+    expect(d.auth.clear).toHaveBeenCalled()
   })
 
   it('opens and cancels a confirm without deleting', async () => {
@@ -343,7 +361,12 @@ describe('useRegistrations', () => {
     expect(result.current.results).toHaveLength(2)
   })
 
-  it('translates a repeated page token into the pagination-looped copy', async () => {
+  it('translates a repeated page token into the pagination-looped copy, and leaves connected true', async () => {
+    // The arm that matters here is "leaves connected true": PAGINATION_LOOPED
+    // is not an auth failure, and its own copy tells the user to just try
+    // again -- which would be a lie if this had disconnected them. Pinning
+    // only the copy translation would pass just as well against a mutant
+    // that disconnects on every load failure, auth or not.
     const d = deps()
     ;(d.api.listEvents as ReturnType<typeof vi.fn>).mockResolvedValue({
       items: [],
@@ -351,5 +374,107 @@ describe('useRegistrations', () => {
     })
     const { result } = renderHook(() => useRegistrations(d))
     await waitFor(() => expect(result.current.error).toBe(COPY.paginationLooped))
+    expect(result.current.connected).toBe(true)
+    expect(d.auth.clear).not.toHaveBeenCalled()
+  })
+
+  it('disconnects instead of refreshing when the finished run halted', async () => {
+    // FIVE events against the hook's default delete concurrency of 3 -- the
+    // same recipe deleteRegistration.test.ts uses to force a real
+    // DELETE_HALTED stand-in (mapWithLimit's first three workers all claim
+    // their indices before any of them fails, so the 401 that sets `halted`
+    // can only short-circuit an item still queued behind it). Genuinely
+    // exercising deleteRegistration's own halt logic here, rather than
+    // fabricating a `results` array by hand, is what proves the hook reacts
+    // to the sentinel deleteRegistration actually produces.
+    const d = deps()
+    const items = Array.from({ length: 5 }, (_, i) =>
+      ev(`e${i}`, '2025-03-14', 'd100', `2025-06-${21 + i}`),
+    )
+    ;(d.api.listEvents as ReturnType<typeof vi.fn>).mockResolvedValue({ items })
+    ;(d.api.deleteEvent as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Unauthorized(401, 'authError', ''),
+    )
+    const { result } = renderHook(() => useRegistrations(d))
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+    act(() => result.current.beginConfirm(calendarDate('2025-03-14')))
+    await act(async () => {
+      await result.current.confirmDelete()
+    })
+    expect(result.current.phase).toBe('done')
+    expect(result.current.results.some((r) => r.error === DELETE_HALTED)).toBe(true)
+
+    const listCallsBefore = (d.api.listEvents as ReturnType<typeof vi.fn>).mock.calls.length
+    act(() => result.current.backToList())
+    expect(result.current.connected).toBe(false)
+    expect(d.auth.clear).toHaveBeenCalled()
+    // Reconnecting is the user's job now, not a requery with the token we
+    // already know is dead.
+    expect((d.api.listEvents as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
+      listCallsBefore,
+    )
+  })
+
+  it('does not let backToList escape a delete in flight', async () => {
+    // Same "the user loses sight of an un-undoable delete" hazard the
+    // deletingRef guard already closed for beginConfirm/cancelConfirm,
+    // reached through the one entry point that guard round left open.
+    const d = deps()
+    const resolvers: ((v: 'deleted') => void)[] = []
+    ;(d.api.deleteEvent as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise((resolve) => resolvers.push(resolve)),
+    )
+    const { result } = renderHook(() => useRegistrations(d))
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+    act(() => result.current.beginConfirm(calendarDate('2025-03-14')))
+
+    let finished!: Promise<void>
+    act(() => {
+      finished = result.current.confirmDelete()
+    })
+    await waitFor(() => expect(result.current.phase).toBe('deleting'))
+
+    act(() => result.current.backToList())
+    expect(result.current.confirming).toBe('2025-03-14')
+    expect(result.current.phase).toBe('deleting')
+
+    act(() => resolvers.forEach((r) => r('deleted')))
+    await act(async () => {
+      await finished
+    })
+    expect(result.current.phase).toBe('done')
+  })
+
+  it('routes to reconnect, rather than retargeting, when beginConfirm follows a halted done summary', async () => {
+    // The gap round 1's deletingRef guard did not close: by the time phase
+    // reaches 'done', deletingRef is false again (the delete is over), so
+    // beginConfirm(otherRow) would go straight through -- discarding the
+    // halted summary and the only chance to act on COPY.deleteHalted's
+    // "go back and reconnect" instruction, without the user ever touching
+    // backToList. Task 10's per-row layout makes this reachable: every row
+    // except the active one renders in 'list' state with a live Delete…
+    // button, including while the active row is showing a halted 'done'.
+    const d = deps()
+    const items = Array.from({ length: 5 }, (_, i) =>
+      ev(`e${i}`, '2025-03-14', 'd100', `2025-06-${21 + i}`),
+    )
+    ;(d.api.listEvents as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [...items, ev('f', '2020-01-01', 'y1', '2021-01-01')],
+    })
+    ;(d.api.deleteEvent as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Unauthorized(401, 'authError', ''),
+    )
+    const { result } = renderHook(() => useRegistrations(d))
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+    act(() => result.current.beginConfirm(calendarDate('2025-03-14')))
+    await act(async () => {
+      await result.current.confirmDelete()
+    })
+    expect(result.current.phase).toBe('done')
+    expect(result.current.results.some((r) => r.error === DELETE_HALTED)).toBe(true)
+
+    act(() => result.current.beginConfirm(calendarDate('2020-01-01')))
+    expect(result.current.confirming).toBeNull()
+    expect(result.current.connected).toBe(false)
   })
 })

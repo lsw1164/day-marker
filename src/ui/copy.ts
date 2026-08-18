@@ -44,7 +44,7 @@ export const COPY = {
   // failed DELETE deletes nothing, but a lost response is indistinguishable from
   // one that landed, so the copy must not promise either way.
   deleteHalted:
-    'Your Google connection expired before every event was deleted. Reconnect, then delete again.',
+    'Your Google connection expired before every event was deleted. Go back and reconnect to finish the rest.',
   deleteSummary: (deleted: number, alreadyGone: number, failed: number) =>
     [
       `${deleted} deleted`,
