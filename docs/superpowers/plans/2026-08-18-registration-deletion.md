@@ -1014,6 +1014,27 @@ git commit -m "feat(google): list events by private property, paginated"
 - Modify: `src/google/errors.ts`
 - Modify: `src/google/calendarApi.ts`
 - Test: `src/google/calendarApi.test.ts` (extend)
+- Modify (mock ripple, see below): `src/google/apply.test.ts`,
+  `src/google/plan.test.ts`, `src/ui/App.test.tsx`,
+  `src/ui/useDayMarker.test.tsx`
+- Modify: `src/ui/Root.test.tsx` — its comment says `listEvents`/`deleteEvent`
+  "arrive in Tasks 3 and 4"; once this task lands, that is fully stale. Either
+  drop the `as unknown as CalendarApi` cast in favour of a real stub, or reword
+  the comment. Do not leave it claiming a future that has arrived.
+
+**The mock ripple — expect it, it is not a surprise.** Adding a required method
+to `CalendarApi` breaks every test that builds the interface as a plain object
+literal without a cast. Task 3 hit exactly this when it added `listEvents`, in
+exactly the four files listed above. Adding `deleteEvent` will break the same
+four. Add a one-line stub to each:
+
+```ts
+deleteEvent: vi.fn(async () => 'deleted' as const),
+```
+
+Do this in a **separate commit** from the feature, as Task 3 did, so the
+feature diff stays readable. `as const` matters: without it the return widens
+to `string` and fails to satisfy `Promise<'deleted' | 'alreadyGone'>`.
 
 **Interfaces:**
 - Consumes: the existing error classes
