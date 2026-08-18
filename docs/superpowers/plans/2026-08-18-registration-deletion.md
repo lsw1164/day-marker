@@ -805,6 +805,10 @@ function ThemeToggle() {
     <Button
       variant="ghost"
       size="icon"
+      // `size="icon"` is size-8 (32px). `size-11` overrides both axes to reach
+      // the 44px touch floor; a square control needs the width too, so
+      // `min-h-11` alone would leave it 32px wide.
+      className="size-11"
       aria-label={name}
       title={name}
       onClick={() => setChoice(next)}
