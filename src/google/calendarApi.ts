@@ -9,12 +9,26 @@ export interface GoogleEvent {
   status: 'confirmed' | 'tentative' | 'cancelled'
   summary?: string
   reminders?: { useDefault: boolean; overrides?: { method: string; minutes: number }[] }
+  /** All-day events carry `date`; both fields are optional because a malformed
+   *  response must degrade rather than crash. */
+  start?: { date?: string }
+  /** Where Day Marker stamps dayMarkerVersion, startDate, and milestoneKey. */
+  extendedProperties?: { private?: Record<string, string> }
+}
+
+export interface EventListPage {
+  items: GoogleEvent[]
+  nextPageToken?: string
 }
 
 export interface CalendarApi {
   getEvent(id: string): Promise<GoogleEvent | null>
   insertEvent(payload: GoogleEventPayload): Promise<GoogleEvent>
   patchEvent(id: string, payload: GoogleEventPayload): Promise<GoogleEvent>
+  listEvents(query: {
+    privateExtendedProperty: string
+    pageToken?: string
+  }): Promise<EventListPage>
 }
 
 interface GoogleErrorBody {
@@ -68,7 +82,7 @@ export function createCalendarApi(
 ): CalendarApi {
   async function request(
     url: string,
-    method: 'GET' | 'POST' | 'PATCH',
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     body?: unknown,
   ): Promise<Response> {
     return fetchImpl(url, {
@@ -99,6 +113,20 @@ export function createCalendarApi(
     },
     async patchEvent(id, payload) {
       return unwrap(await request(`${EVENTS_URL}/${id}`, 'PATCH', payload))
+    },
+    async listEvents({ privateExtendedProperty, pageToken }) {
+      const url = new URL(EVENTS_URL)
+      url.searchParams.set('privateExtendedProperty', privateExtendedProperty)
+      if (pageToken) url.searchParams.set('pageToken', pageToken)
+      // showDeleted is deliberately left at its default of false: a cancelled
+      // event must not appear in a list of what is currently registered.
+      const response = await request(url.toString(), 'GET')
+      if (response.ok) {
+        const body = (await response.json()) as Partial<EventListPage>
+        return { items: body.items ?? [], nextPageToken: body.nextPageToken }
+      }
+      const { reason, detail } = await readError(response)
+      throw toError(response.status, reason, detail)
     },
   }
 }

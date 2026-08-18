@@ -146,3 +146,67 @@ describe('insertEvent and patchEvent', () => {
     expect((init as RequestInit).method).toBe('PATCH')
   })
 })
+
+describe('listEvents', () => {
+  it('sends the private-property filter and returns one page', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(200, {
+        items: [{ id: 'dm1', status: 'confirmed', summary: 'Day 100' }],
+      }),
+    ) as unknown as typeof fetch
+    const page = await apiWith(fetchImpl).listEvents({
+      privateExtendedProperty: 'dayMarkerVersion=1',
+    })
+    const [url, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!
+    expect(String(url)).toContain('privateExtendedProperty=dayMarkerVersion%3D1')
+    expect((init as RequestInit).method).toBe('GET')
+    expect(page.items).toHaveLength(1)
+    expect(page.nextPageToken).toBeUndefined()
+  })
+
+  it('passes a page token through when given one', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { items: [] })) as unknown as typeof fetch
+    await apiWith(fetchImpl).listEvents({
+      privateExtendedProperty: 'dayMarkerVersion=1',
+      pageToken: 'tok-2',
+    })
+    const [url] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!
+    expect(String(url)).toContain('pageToken=tok-2')
+  })
+
+  it('surfaces nextPageToken so the caller can follow it', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(200, { items: [], nextPageToken: 'tok-2' }),
+    ) as unknown as typeof fetch
+    const page = await apiWith(fetchImpl).listEvents({
+      privateExtendedProperty: 'dayMarkerVersion=1',
+    })
+    expect(page.nextPageToken).toBe('tok-2')
+  })
+
+  it('defaults items to an empty array when the body omits it', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {})) as unknown as typeof fetch
+    const page = await apiWith(fetchImpl).listEvents({
+      privateExtendedProperty: 'dayMarkerVersion=1',
+    })
+    expect(page.items).toEqual([])
+  })
+
+  it('does not ask for deleted events', async () => {
+    // showDeleted defaults to false, and we rely on that: a cancelled event must
+    // not appear in a list whose whole purpose is "what is currently registered".
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { items: [] })) as unknown as typeof fetch
+    await apiWith(fetchImpl).listEvents({ privateExtendedProperty: 'dayMarkerVersion=1' })
+    const [url] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!
+    expect(String(url)).not.toContain('showDeleted')
+  })
+
+  it('maps a failure through the existing error types', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(401, googleError(401, 'authError')),
+    ) as unknown as typeof fetch
+    await expect(
+      apiWith(fetchImpl).listEvents({ privateExtendedProperty: 'dayMarkerVersion=1' }),
+    ).rejects.toBeInstanceOf(Unauthorized)
+  })
+})
