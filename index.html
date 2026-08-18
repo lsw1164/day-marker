@@ -10,17 +10,20 @@
       // wrong theme on every load. One mechanism (the class), two sources: a
       // stored choice if there is one, the OS otherwise.
       ;(function () {
+        var stored = null
         try {
-          var stored = localStorage.getItem('dayMarker.theme')
-          var dark =
-            stored === 'dark' ||
-            (stored !== 'light' &&
-              window.matchMedia('(prefers-color-scheme: dark)').matches)
-          if (dark) document.documentElement.classList.add('dark')
+          stored = localStorage.getItem('dayMarker.theme')
         } catch (e) {
-          // Private browsing can throw on localStorage. Falling back to light is
-          // better than failing to render.
+          // Private browsing can throw. Leaving `stored` null hands the decision to
+          // the OS, which is exactly what useTheme's own catch does by returning
+          // 'system'. If the two disagreed, this script would paint one theme and
+          // React would swap it on mount -- the flash this script exists to prevent.
         }
+        var dark =
+          stored === 'dark' ||
+          (stored !== 'light' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches)
+        if (dark) document.documentElement.classList.add('dark')
       })()
     </script>
   </head>
