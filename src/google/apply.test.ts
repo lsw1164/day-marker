@@ -34,6 +34,7 @@ function stubApi(overrides: Partial<CalendarApi> = {}): CalendarApi {
     getEvent: vi.fn(async () => null),
     insertEvent: vi.fn(async () => ({ id: 'x', status: 'confirmed' as const })),
     patchEvent: vi.fn(async () => ({ id: 'x', status: 'confirmed' as const })),
+    listEvents: vi.fn(async () => ({ items: [] })),
     ...overrides,
   }
 }

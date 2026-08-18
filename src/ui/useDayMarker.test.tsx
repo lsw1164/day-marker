@@ -25,6 +25,7 @@ function stubApi(getEvent: (id: string) => GoogleEvent | null = () => null): Cal
     getEvent: vi.fn(async (id: string) => getEvent(id)),
     insertEvent: vi.fn(async () => ({ id: 'x', status: 'confirmed' as const })),
     patchEvent: vi.fn(async () => ({ id: 'x', status: 'confirmed' as const })),
+    listEvents: vi.fn(async () => ({ items: [] })),
   }
 }
 
