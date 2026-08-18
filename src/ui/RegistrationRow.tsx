@@ -40,12 +40,12 @@ export function RegistrationRow({
   const deleted = results.filter((r) => r.outcome === 'deleted').length
   const alreadyGone = results.filter((r) => r.outcome === 'alreadyGone').length
   const failed = results.filter((r) => r.outcome === 'failed').length
-  // A halted run stamps DELETE_HALTED on every event it never attempted. Prefer
-  // that over the first failure's error, because the first failure is ALWAYS the
-  // real 401: mapWithLimit's workers claim indices in increasing order, so the
-  // item that set the halt flag always sorts before the items it short-circuited.
-  // Reading `find(outcome === 'failed')?.error` would therefore render
-  // "Google Calendar API 401 (authError)" and never the reconnect message.
+  // A halted run stamps DELETE_HALTED on every event it touches, including the
+  // one that triggered the halt (see deleteRegistration, post-ed5521c) -- so
+  // every failed result in a halted run carries the sentinel. Preferring it
+  // over the first failure's raw error is what lets `done` say "reconnect"
+  // instead of echoing a bare API string; an ordinary, non-halted failure
+  // (no sentinel present) still surfaces its own error message unchanged.
   const reason = results.some((r) => r.error === DELETE_HALTED)
     ? COPY.deleteHalted
     : results.find((r) => r.outcome === 'failed')?.error
@@ -85,7 +85,12 @@ export function RegistrationRow({
             sees the past events they had forgotten; an "and N more" would hide
             precisely those.
           */}
-          <ul className="mt-3 max-h-56 overflow-y-auto border-t pt-2 text-sm">
+          {/*
+            tabIndex so a keyboard-only user can scroll this list into view
+            without a mouse -- there are no interactive children to trap
+            focus behind, so this cannot create a focus trap.
+          */}
+          <ul tabIndex={0} className="mt-3 max-h-56 overflow-y-auto border-t pt-2 text-sm">
             {registration.events.map((event) => {
               const result = byId.get(event.id)
               const past = event.date < todayDate

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { RegistrationRow, type RegistrationRowProps } from '@/ui/RegistrationRow'
@@ -20,6 +20,13 @@ const REG: Registration = {
 }
 
 const noop = () => {}
+
+/** Scopes an assertion to the one event row carrying `label`, not the whole card. */
+function rowFor(label: string): HTMLElement {
+  const row = screen.getByText(label).closest('li')
+  if (!row) throw new Error(`no <li> ancestor for "${label}"`)
+  return row
+}
 
 function renderRow(over: Partial<RegistrationRowProps> = {}) {
   return render(
@@ -66,11 +73,21 @@ describe('RegistrationRow — confirming', () => {
     expect(screen.getByText('2 Years')).toBeInTheDocument()
   })
 
-  it('marks exactly the past events', () => {
-    renderRow({ state: 'confirming' })
+  it('marks exactly the past events, with today excluded from the count', () => {
     // Against TODAY of 2026-06-01: Day 100 (2025-06-21) and 1 Year (2026-03-14)
-    // are past; 2 Years (2027-03-14) is not. Asserting the count rather than
-    // "at least one" is what catches an off-by-one in the boundary.
+    // are past; 2 Years (2027-03-14) is not, and neither is an event landing
+    // exactly on TODAY -- a milestone due today has not passed, and its date
+    // is already on screen, so it needs no marker. The original three-event
+    // fixture alone cannot catch `<=` replacing `<` at the boundary, since
+    // none of its dates land on TODAY; adding a same-day event and asserting
+    // both that it carries no marker AND that the total count stays at 2
+    // (not 3) is what actually pins the boundary.
+    const regWithToday: Registration = {
+      ...REG,
+      events: [...REG.events, { id: 'd', date: TODAY, label: 'Today' }],
+    }
+    renderRow({ registration: regWithToday, state: 'confirming' })
+    expect(within(rowFor('Today')).queryByText(COPY.statusPast)).not.toBeInTheDocument()
     expect(screen.getAllByText(COPY.statusPast)).toHaveLength(2)
   })
 
@@ -124,6 +141,30 @@ describe('RegistrationRow — deleting and done', () => {
     expect(screen.getAllByText(COPY.statusPast)).toHaveLength(1)
   })
 
+  it('attributes each outcome to its own event, whatever order results arrive in', () => {
+    // useRegistrations.confirmDelete accumulates results in COMPLETION order
+    // (onProgress does `collected.push(result)` under mapWithLimit at
+    // concurrency 3), not input order, so out-of-order is the normal case in
+    // production. Every other fixture in this file puts `results` in the same
+    // relative order as `registration.events`, as an index-aligned prefix --
+    // which would let a match-by-position regression (e.g. keying by
+    // `registration.events.indexOf(event)` instead of `event.id`) pass every
+    // other test. Scoping each assertion to its own row, via `rowFor`, is
+    // what actually pins attribution: a plain `getByText` would pass whether
+    // the badge landed on the right row or the wrong one.
+    renderRow({
+      state: 'done',
+      results: [
+        { event: REG.events[2]!, outcome: 'deleted' },
+        { event: REG.events[0]!, outcome: 'failed', error: 'boom' },
+      ],
+    })
+    expect(within(rowFor('2 Years')).getByText(COPY.outcomeDeleted)).toBeInTheDocument()
+    expect(within(rowFor('Day 100')).getByText(COPY.outcomeFailed)).toBeInTheDocument()
+    // '1 Year' never got a result: it keeps its past marker, not any outcome.
+    expect(within(rowFor('1 Year')).getByText(COPY.statusPast)).toBeInTheDocument()
+  })
+
   it('shows an outcome per event when done', () => {
     renderRow({
       state: 'done',
@@ -142,14 +183,19 @@ describe('RegistrationRow — deleting and done', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('boom')
   })
 
-  it('offers to reconnect when the run halted, rather than showing the raw 401', () => {
-    // The first failure is always the real 401, because mapWithLimit claims
-    // indices in increasing order -- so selecting on `outcome === 'failed'` would
-    // render "Google Calendar API 401 (authError)" and never the actionable copy.
+  it('offers to reconnect when the run halted, rather than showing a raw error', () => {
+    // Since ed5521c, deleteRegistration stamps DELETE_HALTED on the item that
+    // triggers the halt too, not only the ones queued behind it -- so every
+    // failed result in a halted run carries the sentinel, and a raw 401
+    // string never actually reaches this component. The sentinel is still
+    // preferred deliberately: it is the one signal that says "reconnecting is
+    // what fixes this," which no arbitrary error string can promise. The
+    // raw-error path (an ordinary, non-halted failure) is already covered by
+    // the 'boom' assertion in the test above.
     renderRow({
       state: 'done',
       results: [
-        { event: REG.events[0]!, outcome: 'failed', error: 'Google Calendar API 401 (authError)' },
+        { event: REG.events[0]!, outcome: 'failed', error: DELETE_HALTED },
         { event: REG.events[1]!, outcome: 'failed', error: DELETE_HALTED },
         { event: REG.events[2]!, outcome: 'failed', error: DELETE_HALTED },
       ],
