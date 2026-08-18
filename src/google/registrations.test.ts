@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { groupByStartDate, listRegistrations, DISCOVERY_FILTER } from '@/google/registrations'
+import { groupByStartDate, labelFor, listRegistrations, DISCOVERY_FILTER } from '@/google/registrations'
 import type { CalendarApi, EventListPage, GoogleEvent } from '@/google/calendarApi'
 import { Unauthorized } from '@/google/errors'
+import { calendarDate } from '@/domain/calendarDate'
+import { computeMilestones } from '@/domain/milestones'
 
 function ev(
   id: string,
@@ -203,6 +205,17 @@ describe('groupByStartDate', () => {
 
   it('returns nothing for an empty list', () => {
     expect(groupByStartDate([])).toEqual([])
+  })
+})
+
+describe('labelFor', () => {
+  it('agrees with the milestone labels it mirrors', () => {
+    // labelFor reimplements the formatting in src/domain/milestones.ts, and
+    // nothing keeps the two in sync. This cross-checks against the real
+    // computeMilestones output rather than duplicating its fixtures by hand.
+    for (const m of computeMilestones(calendarDate('2025-03-14'), 3)) {
+      expect(labelFor(m.key)).toBe(m.label)
+    }
   })
 })
 
