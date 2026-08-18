@@ -1760,12 +1760,12 @@ git commit -m "feat(google): delete a registration with retry and halt-on-401"
 - Test: `src/ui/useRegistrations.test.ts`
 
 **Interfaces:**
-- Consumes: `type Auth`; `type CalendarApi`; `listRegistrations`, `deleteRegistration`, `type Registration`, `type DeleteResult` from `@/google/registrations`; `type RetryDeps`; `MISSING_CLIENT_ID`, `SIGN_IN_CANCELLED`, `SIGN_IN_IN_PROGRESS` from `@/google/auth`; `COPY`
+- Consumes: `type Auth`; `type CalendarApi`; `listRegistrations`, `deleteRegistration`, `type Registration`, `type DeleteResult` from `@/google/registrations`; `type RetryDeps`; `MISSING_CLIENT_ID`, `SIGN_IN_CANCELLED`, `SIGN_IN_IN_PROGRESS` from `@/google/auth`; `PAGINATION_LOOPED` from `@/google/registrations`; `COPY`
 - Produces:
   - `type RegistrationsPhase = 'idle' | 'loading' | 'ready' | 'deleting' | 'done'`
   - `interface RegistrationsDeps { auth: Auth; api: CalendarApi; retryDeps?: RetryDeps }`
   - `useRegistrations(deps)` returning `{ phase, connected, registrations, confirming, results, error, connect, refresh, beginConfirm, cancelConfirm, confirmDelete, backToList }`
-  - `COPY.registrationsEmpty`, `COPY.registrationsLoading`, `COPY.deleteSummary(deleted, alreadyGone, failed)`
+  - `COPY.registrationsEmpty`, `COPY.registrationsLoading`, `COPY.deleteSummary(deleted, alreadyGone, failed)`, `COPY.paginationLooped`
 
 - [ ] **Step 1: Add the copy**
 
@@ -1788,6 +1788,9 @@ In `src/ui/copy.ts`, inside `COPY`:
   outcomeDeleted: 'Deleted',
   outcomeAlreadyGone: 'Already gone',
   outcomeFailed: 'Failed',
+  // Google handed back a page token it had already served. Rare, and not the
+  // user's doing, so say what to do rather than what went wrong.
+  paginationLooped: 'Your calendar list did not load correctly. Please try again.',
   deleteSummary: (deleted: number, alreadyGone: number, failed: number) =>
     [
       `${deleted} deleted`,
@@ -1954,6 +1957,7 @@ import type { CalendarApi } from '@/google/calendarApi'
 import {
   deleteRegistration,
   listRegistrations,
+  PAGINATION_LOOPED,
   type DeleteResult,
   type Registration,
 } from '@/google/registrations'
@@ -1972,6 +1976,9 @@ function describeError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   if (message === MISSING_CLIENT_ID) return COPY.missingClientId
   if (message === 'popup_failed_to_open') return COPY.popupBlocked
+  // listRegistrations throws this sentinel rather than a sentence, so that
+  // user-facing strings stay in ui/ and the google layer never imports COPY.
+  if (message === PAGINATION_LOOPED) return COPY.paginationLooped
   return message
 }
 

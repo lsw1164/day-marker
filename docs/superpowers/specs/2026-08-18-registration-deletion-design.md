@@ -167,7 +167,13 @@ derives:
 | `startDate` | `extendedProperties.private.startDate` — the registration key |
 | `title` | the **earliest-dated** event's `summary`; if absent, the formatted `startDate`. Not first-in-response order: `events.list` sets no `orderBy`, so that would let one registration rename itself between loads |
 | `count` | number of events in the group |
-| `events` | id, milestone label (from `milestoneKey`), and date, sorted by date |
+| `events` | id, milestone label (from `milestoneKey`), and date, sorted by date then id, so the order is total |
+
+An event's own date comes from `start.date`, or from the first ten characters of
+`start.dateTime` when the user has switched it off all-day — the stamps survive that
+toggle, so dropping it would leave an event that is invisible to the list and
+therefore undeletable. Events with no usable date, no id, or `status: 'cancelled'`
+are excluded; an id-less event could otherwise become `DELETE /events/undefined`.
 
 No label field is stamped. Showing the earliest-dated event's summary displays
 `Anna & Ben: Day 100` when a label exists and `Day 100` when it does not, which is
