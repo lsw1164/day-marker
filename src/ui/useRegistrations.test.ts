@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { useRegistrations, type RegistrationsDeps } from '@/ui/useRegistrations'
 import type { Auth } from '@/google/auth'
 import type { CalendarApi, GoogleEvent } from '@/google/calendarApi'
-import { Unauthorized } from '@/google/errors'
+import { ServerError, Unauthorized } from '@/google/errors'
 import { DELETE_HALTED } from '@/google/registrations'
 import { calendarDate } from '@/domain/calendarDate'
 import { COPY } from '@/ui/copy'
@@ -210,14 +210,17 @@ describe('useRegistrations', () => {
     // until the new run's first progress callback fires. A caller rendering
     // between confirmDelete's call and its first callback must not see a
     // report for events it has not touched yet.
+    //
+    // Reaching the second run through beginConfirm (as an earlier version of
+    // this test did) or backToList would not discriminate: both already
+    // clear `results` themselves -- beginConfirm's non-halted retarget branch
+    // has done so since 4c87e4b -- so the assertion below would pass even if
+    // confirmDelete's own `setResults([])` were removed entirely. Calling
+    // confirmDelete a second time against the SAME `confirming` target, with
+    // no beginConfirm or backToList in between, is the only way to isolate
+    // confirmDelete's own reset: nothing else on this path could explain the
+    // clearing.
     const d = deps()
-    ;(d.api.listEvents as ReturnType<typeof vi.fn>).mockResolvedValue({
-      items: [
-        ev('a', '2025-03-14', 'd100', '2025-06-21'),
-        ev('b', '2025-03-14', 'y1', '2026-03-14'),
-        ev('c', '2020-01-01', 'y1', '2021-01-01'),
-      ],
-    })
     const { result } = renderHook(() => useRegistrations(d))
     await waitFor(() => expect(result.current.phase).toBe('ready'))
 
@@ -228,30 +231,25 @@ describe('useRegistrations', () => {
     expect(result.current.phase).toBe('done')
     expect(result.current.results).toHaveLength(2)
 
-    // Deliberately not going through backToList(): that helper clears
-    // `results` itself on the way back to the list, which would make this
-    // assertion pass regardless of whether confirmDelete resets anything --
-    // exactly the kind of fixture-already-satisfies-it test that proves
-    // nothing. Moving straight to a second confirm leaves the first run's
-    // `results` sitting in state until confirmDelete's own reset (or its
-    // absence) decides what happens to them.
-    let resolveSecond!: (v: 'deleted') => void
+    // A queue, not a single variable: the target registration has two events,
+    // so two concurrent deleteEvent calls each need their own resolver -- see
+    // the identical comment on the re-entrancy test above.
+    const resolvers: ((v: 'deleted') => void)[] = []
     ;(d.api.deleteEvent as ReturnType<typeof vi.fn>).mockImplementation(
-      () => new Promise((resolve) => (resolveSecond = resolve)),
+      () => new Promise((resolve) => resolvers.push(resolve)),
     )
-    act(() => result.current.beginConfirm(calendarDate('2020-01-01')))
     let inFlight!: Promise<void>
     act(() => {
       inFlight = result.current.confirmDelete()
     })
-    // Synchronously cleared, before the new run's single event has any outcome.
+    // Synchronously cleared, before the new run's events have any outcome.
     expect(result.current.results).toEqual([])
 
-    act(() => resolveSecond('deleted'))
+    act(() => resolvers.forEach((r) => r('deleted')))
     await act(async () => {
       await inFlight
     })
-    expect(result.current.results).toHaveLength(1)
+    expect(result.current.results).toHaveLength(2)
   })
 
   it('does not let a refresh mid-delete knock the phase out of deleting', async () => {
@@ -421,6 +419,38 @@ describe('useRegistrations', () => {
     expect((d.api.listEvents as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
       listCallsBefore,
     )
+  })
+
+  it('refreshes rather than disconnects on Back after an ordinary failure, not just a halted one', async () => {
+    // isHaltedRun means "the run stopped early because the token died," not
+    // merely "something in it failed." Substituting
+    // `results.some(r => r.outcome === 'failed')` would make an ordinary 5xx
+    // that exhausted its retries -- no DELETE_HALTED anywhere in `results` --
+    // make Back drop to the connect prompt and sign the user out, instead of
+    // refreshing with the token it still has.
+    const d = deps()
+    ;(d.api.deleteEvent as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new ServerError(500, 'backendError', ''),
+    )
+    const { result } = renderHook(() => useRegistrations(d))
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+    act(() => result.current.beginConfirm(calendarDate('2025-03-14')))
+    await act(async () => {
+      await result.current.confirmDelete()
+    })
+    expect(result.current.phase).toBe('done')
+    expect(result.current.results.every((r) => r.outcome === 'failed')).toBe(true)
+    expect(result.current.results.some((r) => r.error === DELETE_HALTED)).toBe(false)
+
+    const listCallsBefore = (d.api.listEvents as ReturnType<typeof vi.fn>).mock.calls.length
+    act(() => result.current.backToList())
+    await waitFor(() =>
+      expect((d.api.listEvents as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(
+        listCallsBefore,
+      ),
+    )
+    expect(result.current.connected).toBe(true)
+    expect(d.auth.clear).not.toHaveBeenCalled()
   })
 
   it('does not let backToList escape a delete in flight', async () => {
