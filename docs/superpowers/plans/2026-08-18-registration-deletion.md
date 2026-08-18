@@ -1801,7 +1801,7 @@ In `src/ui/copy.ts`, inside `COPY`:
   // failed DELETE deletes nothing, but a lost response is indistinguishable from
   // one that landed, so the copy must not promise either way.
   deleteHalted:
-    'Your Google connection expired before every event was deleted. Reconnect, then delete again.',
+    'Your Google connection expired before every event was deleted. Go back and reconnect to finish the rest.',
   deleteSummary: (deleted: number, alreadyGone: number, failed: number) =>
     [
       `${deleted} deleted`,
@@ -2735,7 +2735,7 @@ git commit -m "feat(ui): list and delete registrations"
 
 ---
 
-### Task 11: Docs — the deployment requirement and four manual checks
+### Task 11: Docs — the deployment requirement and five manual checks
 
 **Files:**
 - Create: `public/_redirects`
@@ -2809,7 +2809,7 @@ is why a registration made on another device, or a year ago, still appears.
 Deleting removes the whole registration — past events included.
 ```
 
-- [ ] **Step 4: Add four manual checks**
+- [ ] **Step 4: Add five manual checks**
 
 Append to `docs/manual-verification.md`, continuing the existing numbering:
 
@@ -2841,7 +2841,21 @@ user-agent styled, so they only follow the theme if `color-scheme` is applied.
 - **Expect:** the page loads. A 404 means the host rewrite from the README's
   Deploying section is missing — record the host and what you configured.
 
-## 9. Delete, then re-register
+## 9. The sign-in popup is not blocked
+
+Google Identity Services only opens its popup if `requestAccessToken` is reached
+inside the user's gesture, before any `await`. Both hooks do this correctly, but
+**no unit test can see a regression**: every test stubs auth, so inserting an
+`await` before the call leaves the whole suite green. This was verified by mutation
+during the Task 8 review — the mutant passed all 296 tests.
+
+- From a cold load, click **Connect** on the main screen. Then repeat from the
+  Registrations tab.
+- **Expect:** Google's account chooser opens both times. A silent no-op, or a
+  browser "popup blocked" indicator, means an `await` crept in ahead of the token
+  request — record which screen.
+
+## 10. Delete, then re-register
 
 This is the deliberate version of check 4, and it decides whether the app needs
 an ID-versioning escape hatch.
