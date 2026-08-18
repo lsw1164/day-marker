@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import { groupByStartDate, labelFor, listRegistrations, DISCOVERY_FILTER } from '@/google/registrations'
+import {
+  groupByStartDate,
+  labelFor,
+  listRegistrations,
+  DISCOVERY_FILTER,
+  PAGINATION_LOOPED,
+} from '@/google/registrations'
 import type { CalendarApi, EventListPage, GoogleEvent } from '@/google/calendarApi'
 import { Unauthorized } from '@/google/errors'
 import { calendarDate } from '@/domain/calendarDate'
@@ -335,9 +341,14 @@ describe('listRegistrations', () => {
       deleteEvent: vi.fn(),
       listEvents: vi.fn(async () => ({ items: [], nextPageToken: 'loop' })),
     }
-    await expect(listRegistrations(api)).rejects.toThrow(
-      'Calendar pagination repeated a page token; refusing to loop',
-    )
+    // A sentinel, not prose: the google layer never imports from ui/, and
+    // ui/ maps this the same way it maps MISSING_CLIENT_ID, so a message
+    // meant for a developer log never renders as user copy.
+    await expect(listRegistrations(api)).rejects.toThrow(PAGINATION_LOOPED)
+    // Pins the placement, not just the outcome: the guard must throw before
+    // issuing the repeated request, not after -- exactly two calls, not
+    // three.
+    expect(api.listEvents).toHaveBeenCalledTimes(2)
   })
 
   it('propagates a failure rather than returning a partial list', async () => {

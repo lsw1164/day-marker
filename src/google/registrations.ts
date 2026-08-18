@@ -7,6 +7,13 @@ import type { CalendarApi, GoogleEvent } from '@/google/calendarApi'
  */
 export const DISCOVERY_FILTER = 'dayMarkerVersion=1'
 
+/**
+ * Thrown when the calendar hands back a page token it has already served. Not a
+ * message: `ui/` maps this sentinel to user copy, the same way it maps
+ * MISSING_CLIENT_ID, so that user-facing strings stay out of the google layer.
+ */
+export const PAGINATION_LOOPED = 'PAGINATION_LOOPED'
+
 export interface RegistrationEvent {
   id: string
   date: CalendarDate
@@ -148,7 +155,7 @@ export async function listRegistrations(api: CalendarApi): Promise<Registration[
     pageToken = page.nextPageToken
     if (pageToken) {
       if (seen.has(pageToken)) {
-        throw new Error('Calendar pagination repeated a page token; refusing to loop')
+        throw new Error(PAGINATION_LOOPED)
       }
       seen.add(pageToken)
     }
