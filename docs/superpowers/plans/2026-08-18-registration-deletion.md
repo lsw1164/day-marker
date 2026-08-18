@@ -2105,7 +2105,7 @@ Create `src/ui/RegistrationRow.test.tsx`:
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { RegistrationRow } from '@/ui/RegistrationRow'
+import { RegistrationRow, type RegistrationRowProps } from '@/ui/RegistrationRow'
 import type { Registration } from '@/google/registrations'
 import { calendarDate } from '@/domain/calendarDate'
 import { COPY } from '@/ui/copy'
@@ -2125,7 +2125,7 @@ const REG: Registration = {
 
 const noop = () => {}
 
-function renderRow(over: Partial<React.ComponentProps<typeof RegistrationRow>> = {}) {
+function renderRow(over: Partial<RegistrationRowProps> = {}) {
   return render(
     <RegistrationRow
       registration={REG}
@@ -2170,10 +2170,12 @@ describe('RegistrationRow — confirming', () => {
     expect(screen.getByText('2 Years')).toBeInTheDocument()
   })
 
-  it('marks past events', () => {
+  it('marks exactly the past events', () => {
     renderRow({ state: 'confirming' })
-    // Day 100 fell on 2025-06-21, before TODAY of 2026-06-01.
-    expect(screen.getByText(COPY.statusPast)).toBeInTheDocument()
+    // Against TODAY of 2026-06-01: Day 100 (2025-06-21) and 1 Year (2026-03-14)
+    // are past; 2 Years (2027-03-14) is not. Asserting the count rather than
+    // "at least one" is what catches an off-by-one in the boundary.
+    expect(screen.getAllByText(COPY.statusPast)).toHaveLength(2)
   })
 
   it('warns with the count and says it cannot be undone', () => {
