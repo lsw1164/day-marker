@@ -1010,7 +1010,6 @@ git commit -m "feat(google): list events by private property, paginated"
 ### Task 4: `deleteEvent`, with already-gone as a success
 
 **Files:**
-- Modify: `src/google/errors.ts`
 - Modify: `src/google/calendarApi.ts`
 - Test: `src/google/calendarApi.test.ts` (extend)
 - Modify (mock ripple, see below): `src/google/apply.test.ts`,
@@ -1141,7 +1140,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/google/errors.ts src/google/calendarApi.ts src/google/calendarApi.test.ts
+git add src/google/calendarApi.ts src/google/calendarApi.test.ts
 git commit -m "feat(google): delete events, treating already-gone as success"
 ```
 
