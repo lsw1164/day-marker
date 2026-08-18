@@ -118,4 +118,6 @@ with "Cannot read properties of undefined (reading 'digest')".
 
 - Design: `docs/superpowers/specs/2026-08-17-day-marker-design.md`
 - Plan: `docs/superpowers/plans/2026-08-17-day-marker.md`
+- Registration deletion design: `docs/superpowers/specs/2026-08-18-registration-deletion-design.md`
+- Registration deletion plan: `docs/superpowers/plans/2026-08-18-registration-deletion.md`
 - Manual checks: `docs/manual-verification.md`
