@@ -196,7 +196,14 @@ export function RegistrationsPage({
         </Alert>
       )}
       {/*
-        Mirrors App's identical gisReady === false alert: this page copied the
+        Borrows App's gisReady === false alert -- the same copy, deliberately
+        NOT the same condition. App shows its alert whether or not it is
+        connected; this one is additionally gated on !state.connected, because
+        here the explanation is only worth showing beside the Connect button it
+        explains. Do not "unify" the two by widening this back to App's
+        condition without re-checking the one-alert invariant below.
+
+        The gap it closes: this page copied the
         tri-state and the Connect button's `disabled={gisReady !== true}` guard
         but not the explanation, so an ad-blocked user on this deep link got a
         permanently disabled button next to prose naming an action it cannot
