@@ -78,26 +78,28 @@ export async function applyPlan(
       onProgress(result)
       return result
     }
+    let result: ItemResult
     try {
       const outcome = await withRetry(() => applyOne(api, item, options), isRetryable, retryDeps)
-      const result: ItemResult = { item, outcome }
-      onProgress(result)
-      return result
+      result = { item, outcome }
     } catch (error) {
       // Losing the token invalidates every remaining write, so stop scheduling.
       if (error instanceof Unauthorized) halted = true
-      const result: ItemResult = { item, outcome: 'failed', error: describe(error) }
-      onProgress(result)
-      return result
+      result = { item, outcome: 'failed', error: describe(error) }
     }
+    onProgress(result)
+    return result
   })
 
-  // The per-item callback is *nearly* total, but not quite: `onProgress` runs
-  // outside the try in the halted branch and again inside the catch, so a
-  // throwing progress callback rejects the slot. An unconditional
-  // `as PromiseFulfilledResult<ItemResult>` would then push `undefined` into
-  // React state and crash the result screen. Surface the rejection instead,
-  // exactly as `buildPlan` does for a failed probe.
+  // onProgress runs exactly once per item, after its outcome is fully
+  // decided, in every branch -- halted, success, and failure alike. A
+  // callback that throws can therefore only reject that item's slot; it can
+  // no longer run *during* outcome construction and have the catch above
+  // swallow its exception and relabel a completed write as 'failed'. An
+  // unconditional `as PromiseFulfilledResult<ItemResult>` on the settled
+  // array would push `undefined` into React state and crash the result
+  // screen, so surface the rejection instead, exactly as `buildPlan` does for
+  // a failed probe.
   return settled.map((r) => {
     if (r.status === 'rejected') throw r.reason
     return r.value

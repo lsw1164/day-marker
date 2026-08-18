@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   deleteRegistration,
   DELETE_HALTED_MESSAGE,
+  type DeleteResult,
   type RegistrationEvent,
 } from '@/google/registrations'
 import type { CalendarApi } from '@/google/calendarApi'
@@ -125,5 +126,30 @@ describe('deleteRegistration', () => {
     const out = await deleteRegistration(apiWith(deleteEvent), [], () => {}, RETRY)
     expect(out).toEqual([])
     expect(deleteEvent).not.toHaveBeenCalled()
+  })
+
+  it('rejects rather than mislabel a completed deletion when onProgress throws', async () => {
+    // Regression test: onProgress used to run *inside* the try, so a
+    // callback that threw while handling a genuine success fell into the
+    // catch block below it, which rewrote the already-successful outcome as
+    // 'failed' with the callback's own error message -- reporting a deleted
+    // event as not deleted, on a path with no undo -- and then called
+    // onProgress a *second* time with that fabricated failure, which is what
+    // actually produced the rejection. A bare `.rejects.toThrow` cannot tell
+    // that apart from the fixed behaviour, because both end up rejecting
+    // with the same message: this asserts onProgress was only ever called
+    // once, and with the true 'deleted' outcome, before the reject happened.
+    const seen: DeleteResult[] = []
+    const onProgress = (result: DeleteResult) => {
+      seen.push(result)
+      throw new Error('render exploded')
+    }
+    const deleteEvent = vi.fn(async () => 'deleted' as const)
+    await expect(
+      deleteRegistration(apiWith(deleteEvent), evs(1), onProgress, RETRY),
+    ).rejects.toThrow('render exploded')
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.outcome).toBe('deleted')
+    expect(seen[0]?.error).toBeUndefined()
   })
 })
