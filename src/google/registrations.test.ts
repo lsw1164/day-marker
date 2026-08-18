@@ -158,7 +158,7 @@ function apiServing(pages: Record<string, EventListPage>): CalendarApi {
       }
       return page
     }),
-  } as unknown as CalendarApi
+  }
 }
 
 describe('listRegistrations', () => {
@@ -204,7 +204,7 @@ describe('listRegistrations', () => {
 
   it('propagates a failure rather than returning a partial list', async () => {
     // A partial list presented as complete is a lie about the user's calendar.
-    const api = {
+    const api: CalendarApi = {
       getEvent: vi.fn(),
       insertEvent: vi.fn(),
       patchEvent: vi.fn(),
@@ -212,7 +212,7 @@ describe('listRegistrations', () => {
       listEvents: vi.fn(async () => {
         throw new Unauthorized(401, 'authError', '')
       }),
-    } as unknown as CalendarApi
+    }
     await expect(listRegistrations(api)).rejects.toBeInstanceOf(Unauthorized)
   })
 })
