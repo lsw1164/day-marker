@@ -75,7 +75,12 @@ export function groupByStartDate(events: GoogleEvent[]): Registration[] {
         // group in one expression.
         title: sorted[0]?.summary ?? formatLong(startDate),
         count: sorted.length,
-        events: sorted,
+        // Rebuilt rather than passed through: `sorted` is `Attributed`, so
+        // handing it back would put a `summary` key on every event that
+        // `RegistrationEvent` does not declare. Harmless to read, but it makes
+        // the runtime shape disagree with the exported type, and a later
+        // deep-equality assertion on `events` would fail on the extra key.
+        events: sorted.map((e) => ({ id: e.id, date: e.date, label: e.label })),
       }
     })
     // Descending string comparison, which is chronological for YYYY-MM-DD.
