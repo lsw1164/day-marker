@@ -1,5 +1,8 @@
 import { formatLong, isCalendarDate, type CalendarDate } from '@/domain/calendarDate'
 import type { CalendarApi, GoogleEvent } from '@/google/calendarApi'
+import { isRetryable, Unauthorized } from '@/google/errors'
+import { DEFAULT_RETRY_DEPS, withRetry, type RetryDeps } from '@/lib/backoff'
+import { mapWithLimit } from '@/lib/mapWithLimit'
 
 /**
  * The discovery predicate. If `dayMarkerVersion` is ever bumped, this must match
@@ -161,4 +164,85 @@ export async function listRegistrations(api: CalendarApi): Promise<Registration[
     }
   } while (pageToken)
   return groupByStartDate([...byId.values()])
+}
+
+export type DeleteOutcome = 'deleted' | 'alreadyGone' | 'failed'
+
+export interface DeleteResult {
+  event: RegistrationEvent
+  outcome: DeleteOutcome
+  error?: string
+}
+
+export const DELETE_CONCURRENCY = 3
+
+/**
+ * Not user copy directly assembled here for display -- ui/ owns that -- but,
+ * like apply.ts's HALTED_MESSAGE, this is the literal error text carried on a
+ * DeleteResult so a screen listing failures can tell "never attempted because
+ * the token died" apart from "attempted and got a real 401", without the
+ * google layer importing from ui/.
+ */
+export const DELETE_HALTED_MESSAGE = 'Stopped after the Google connection expired'
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Deliberately the same shape as applyPlan: mapWithLimit at concurrency 3, each
+ * call wrapped in withRetry gated by isRetryable, per-item results reported live,
+ * and a 401 halting the remainder rather than firing doomed requests at a dead
+ * token. Operates only on the exact `events` array the caller passes in -- the
+ * same array the confirm screen showed -- never re-querying or re-deriving it,
+ * so every input event appears exactly once in the result, in input order,
+ * whatever its outcome.
+ */
+export async function deleteRegistration(
+  api: CalendarApi,
+  events: RegistrationEvent[],
+  onProgress: (result: DeleteResult) => void,
+  retryDeps: RetryDeps = DEFAULT_RETRY_DEPS,
+  concurrency: number = DELETE_CONCURRENCY,
+): Promise<DeleteResult[]> {
+  let halted = false
+
+  const settled = await mapWithLimit(events, concurrency, async (event) => {
+    if (halted) {
+      const result: DeleteResult = {
+        event,
+        outcome: 'failed',
+        error: DELETE_HALTED_MESSAGE,
+      }
+      onProgress(result)
+      return result
+    }
+    try {
+      const outcome = await withRetry(() => api.deleteEvent(event.id), isRetryable, retryDeps)
+      const result: DeleteResult = { event, outcome }
+      onProgress(result)
+      return result
+    } catch (error) {
+      // Losing the token invalidates every remaining delete, so stop scheduling.
+      if (error instanceof Unauthorized) halted = true
+      const result: DeleteResult = {
+        event,
+        outcome: 'failed',
+        error: describeError(error),
+      }
+      onProgress(result)
+      return result
+    }
+  })
+
+  // The per-item callback is *nearly* total, but not quite: `onProgress` runs
+  // outside the try in the halted branch and again inside the catch, so a
+  // throwing progress callback rejects the slot. An unconditional
+  // `as PromiseFulfilledResult<DeleteResult>` would then push `undefined` into
+  // React state and crash whatever screen renders these results. Surface the
+  // rejection instead, exactly as applyPlan does.
+  return settled.map((r) => {
+    if (r.status === 'rejected') throw r.reason
+    return r.value
+  })
 }
