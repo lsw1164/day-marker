@@ -177,13 +177,16 @@ export interface DeleteResult {
 export const DELETE_CONCURRENCY = 3
 
 /**
- * Not user copy directly assembled here for display -- ui/ owns that -- but,
- * like apply.ts's HALTED_MESSAGE, this is the literal error text carried on a
- * DeleteResult so a screen listing failures can tell "never attempted because
- * the token died" apart from "attempted and got a real 401", without the
- * google layer importing from ui/.
+ * Stamped on every event a halted run never attempted. A sentinel rather than
+ * a sentence -- the same convention as PAGINATION_LOOPED -- because the real
+ * 401 that triggered the halt always sorts to a lower index than any item it
+ * short-circuits (mapWithLimit's workers claim indices in strictly increasing
+ * order), so a screen rendering the first failure's `error` would otherwise
+ * show the raw API string instead of something that explains itself. `ui/`
+ * maps this sentinel to copy that offers to reconnect, which is the action
+ * the user needs and which the google layer must not word.
  */
-export const DELETE_HALTED_MESSAGE = 'Stopped after the Google connection expired'
+export const DELETE_HALTED = 'delete_halted'
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -212,7 +215,7 @@ export async function deleteRegistration(
       const result: DeleteResult = {
         event,
         outcome: 'failed',
-        error: DELETE_HALTED_MESSAGE,
+        error: DELETE_HALTED,
       }
       onProgress(result)
       return result

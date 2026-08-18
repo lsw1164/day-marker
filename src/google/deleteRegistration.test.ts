@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   deleteRegistration,
-  DELETE_HALTED_MESSAGE,
+  DELETE_HALTED,
   type DeleteResult,
   type RegistrationEvent,
 } from '@/google/registrations'
@@ -97,7 +97,7 @@ describe('deleteRegistration', () => {
     const out = await deleteRegistration(apiWith(deleteEvent), evs(5), () => {}, RETRY)
     expect(out).toHaveLength(5)
     expect(out.every((r) => r.outcome === 'failed')).toBe(true)
-    expect(out.filter((r) => r.error === DELETE_HALTED_MESSAGE)).toHaveLength(2)
+    expect(out.filter((r) => r.error === DELETE_HALTED)).toHaveLength(2)
     expect(deleteEvent).toHaveBeenCalledTimes(3)
   })
 
