@@ -68,12 +68,20 @@ describe('useRegistrations', () => {
     expect(d.api.listEvents).toHaveBeenCalled()
   })
 
-  it('reports a listing failure without showing a partial list', async () => {
+  it('clears the previously-loaded list when a later refresh fails', async () => {
+    // The brief's own version of this test rejected on the very first load,
+    // before `registrations` was ever populated -- so `toEqual([])` passed
+    // whether or not the catch branch actually cleared anything; the fixture
+    // already satisfied the assertion. Succeeding once first, and failing on
+    // a subsequent refresh, is what makes the clear a real behaviour to test:
+    // without it, the stale one-item list would still be sitting in state.
     const d = deps()
-    ;(d.api.listEvents as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Unauthorized(401, 'authError', ''),
-    )
     const { result } = renderHook(() => useRegistrations(d))
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+    expect(result.current.registrations).toHaveLength(1)
+
+    ;(d.api.listEvents as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('list exploded'))
+    act(() => result.current.refresh())
     await waitFor(() => expect(result.current.error).toBeTruthy())
     expect(result.current.registrations).toEqual([])
   })
@@ -476,5 +484,51 @@ describe('useRegistrations', () => {
     act(() => result.current.beginConfirm(calendarDate('2020-01-01')))
     expect(result.current.confirming).toBeNull()
     expect(result.current.connected).toBe(false)
+  })
+
+  it('does not reload on every render when the caller rebuilds api/auth fresh each render', async () => {
+    // Task 10 calls useRegistrations({ auth: deps.auth, api: deps.api,
+    // retryDeps: deps.retryDeps }) as a fresh object literal inside its
+    // render body. main.tsx keeps the underlying auth/api as module-level
+    // singletons today, so in production this wrapper churn alone is
+    // harmless -- but nothing in this hook's contract depends on that
+    // discipline holding, and the historical incident this guards against
+    // (884 to 8,463 real Google Calendar requests in one run of an earlier
+    // hook in this project) was exactly a caller that did not keep it. This
+    // test reconstructs auth/api themselves fresh every render -- the worst
+    // case the apiRef/authRef pattern exists to tolerate -- rather than only
+    // the wrapper, so a regression back to depending on api/auth directly
+    // shows up here rather than staying invisible behind a caller that
+    // happens to keep them stable.
+    let listEventsCalls = 0
+    function freshDeps(): RegistrationsDeps {
+      const auth: Auth = {
+        connect: vi.fn(async () => 'tok'),
+        token: vi.fn(() => 'tok'),
+        clear: vi.fn(),
+      }
+      const api = {
+        getEvent: vi.fn(),
+        insertEvent: vi.fn(),
+        patchEvent: vi.fn(),
+        deleteEvent: vi.fn(),
+        listEvents: vi.fn(async () => {
+          listEventsCalls += 1
+          return { items: [] }
+        }),
+      } as unknown as CalendarApi
+      return { auth, api, retryDeps: RETRY }
+    }
+
+    const { result, rerender } = renderHook(() => useRegistrations(freshDeps()))
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+
+    act(() => {
+      for (let i = 0; i < 20; i += 1) rerender()
+    })
+
+    // Loading is driven by [connected, loadNonce] alone. A caller rebuilding
+    // api/auth every render must not add a single extra request.
+    expect(listEventsCalls).toBe(1)
   })
 })
