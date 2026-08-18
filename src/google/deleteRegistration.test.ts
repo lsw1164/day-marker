@@ -20,40 +20,53 @@ function evs(n: number): RegistrationEvent[] {
   }))
 }
 
-function apiWith(deleteEvent: CalendarApi['deleteEvent']): CalendarApi {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// Mirrors apply.test.ts's stubApi rather than casting through `unknown`: a
+// bare `as unknown as CalendarApi` unchecks the three stubs this suite
+// doesn't exercise, and Task 4 removed exactly that cast pattern so a
+// CalendarApi signature change breaks mocks at compile time instead of
+// silently passing a mock that no longer matches.
+function stubApi(overrides: Partial<CalendarApi> = {}): CalendarApi {
   return {
-    getEvent: vi.fn(),
-    insertEvent: vi.fn(),
-    patchEvent: vi.fn(),
-    listEvents: vi.fn(),
-    deleteEvent,
-  } as unknown as CalendarApi
+    getEvent: vi.fn(async () => null),
+    insertEvent: vi.fn(async () => ({ id: 'x', status: 'confirmed' as const })),
+    patchEvent: vi.fn(async () => ({ id: 'x', status: 'confirmed' as const })),
+    listEvents: vi.fn(async () => ({ items: [] })),
+    deleteEvent: vi.fn(async () => 'deleted' as const),
+    ...overrides,
+  }
 }
 
 describe('deleteRegistration', () => {
-  it('reports every event as deleted on a clean run', async () => {
-    const api = apiWith(vi.fn(async () => 'deleted' as const))
-    const out = await deleteRegistration(api, evs(3), () => {}, RETRY)
+  it('reports every event as deleted on a clean run, deleting exactly the ids it was given', async () => {
+    const deleteEvent = vi.fn(async (_id: string) => 'deleted' as const)
+    const out = await deleteRegistration(stubApi({ deleteEvent }), evs(3), () => {}, RETRY)
     expect(out.map((r) => r.outcome)).toEqual(['deleted', 'deleted', 'deleted'])
+    // The count of calls proves nothing about *which* events were touched.
+    // A mutant that deletes events[0] three times, or appends a stray
+    // character to every id, still makes three calls and still resolves
+    // 'deleted' three times -- only the actual arguments catch it.
+    expect(deleteEvent.mock.calls.map((c) => c[0])).toEqual(['dm0', 'dm1', 'dm2'])
   })
 
   it('passes alreadyGone straight through as a success', async () => {
-    const api = apiWith(vi.fn(async () => 'alreadyGone' as const))
-    const out = await deleteRegistration(api, evs(2), () => {}, RETRY)
+    const deleteEvent = vi.fn(async () => 'alreadyGone' as const)
+    const out = await deleteRegistration(stubApi({ deleteEvent }), evs(2), () => {}, RETRY)
     expect(out.map((r) => r.outcome)).toEqual(['alreadyGone', 'alreadyGone'])
     expect(out.every((r) => r.error === undefined)).toBe(true)
   })
 
   it('retries a rate limit and then succeeds', async () => {
     let calls = 0
-    const api = apiWith(
-      vi.fn(async () => {
-        calls += 1
-        if (calls < 3) throw new RateLimited(429, 'rateLimitExceeded', '')
-        return 'deleted' as const
-      }),
-    )
-    const out = await deleteRegistration(api, evs(1), () => {}, RETRY)
+    const deleteEvent = vi.fn(async () => {
+      calls += 1
+      if (calls < 3) throw new RateLimited(429, 'rateLimitExceeded', '')
+      return 'deleted' as const
+    })
+    const out = await deleteRegistration(stubApi({ deleteEvent }), evs(1), () => {}, RETRY)
     expect(out[0]?.outcome).toBe('deleted')
     expect(calls).toBe(3)
   })
@@ -64,26 +77,22 @@ describe('deleteRegistration', () => {
     // deleteEvent resolves as 'alreadyGone' rather than throwing -- so the
     // retried outcome must still read as success, not 'failed'.
     let calls = 0
-    const api = apiWith(
-      vi.fn(async () => {
-        calls += 1
-        if (calls < 2) throw new RateLimited(429, 'rateLimitExceeded', '')
-        return 'alreadyGone' as const
-      }),
-    )
-    const out = await deleteRegistration(api, evs(1), () => {}, RETRY)
+    const deleteEvent = vi.fn(async () => {
+      calls += 1
+      if (calls < 2) throw new RateLimited(429, 'rateLimitExceeded', '')
+      return 'alreadyGone' as const
+    })
+    const out = await deleteRegistration(stubApi({ deleteEvent }), evs(1), () => {}, RETRY)
     expect(out[0]?.outcome).toBe('alreadyGone')
     expect(out[0]?.error).toBeUndefined()
     expect(calls).toBe(2)
   })
 
   it('fails an item once the attempts run out', async () => {
-    const api = apiWith(
-      vi.fn(async () => {
-        throw new RateLimited(429, 'rateLimitExceeded', '')
-      }),
-    )
-    const out = await deleteRegistration(api, evs(1), () => {}, RETRY)
+    const deleteEvent = vi.fn(async () => {
+      throw new RateLimited(429, 'rateLimitExceeded', '')
+    })
+    const out = await deleteRegistration(stubApi({ deleteEvent }), evs(1), () => {}, RETRY)
     expect(out[0]?.outcome).toBe('failed')
     expect(out[0]?.error).toContain('429')
   })
@@ -94,11 +103,27 @@ describe('deleteRegistration', () => {
     const deleteEvent = vi.fn(async () => {
       throw new Unauthorized(401, 'authError', '')
     })
-    const out = await deleteRegistration(apiWith(deleteEvent), evs(5), () => {}, RETRY)
+    const seen: string[] = []
+    const out = await deleteRegistration(
+      stubApi({ deleteEvent }),
+      evs(5),
+      (r) => seen.push(r.event.id),
+      RETRY,
+    )
     expect(out).toHaveLength(5)
     expect(out.every((r) => r.outcome === 'failed')).toBe(true)
-    expect(out.filter((r) => r.error === DELETE_HALTED)).toHaveLength(2)
+    const halted = out.filter((r) => r.error === DELETE_HALTED)
+    expect(halted).toHaveLength(2)
+    // The two never-attempted rows must still be attributed to the right
+    // events (dm3 and dm4, the ones still queued behind concurrency 3), not
+    // to whichever event happened to trip the halt.
+    expect(halted.map((r) => r.event.id).sort()).toEqual(['dm3', 'dm4'])
     expect(deleteEvent).toHaveBeenCalledTimes(3)
+    // onProgress must still fire for every one of the five events, including
+    // the two that were never attempted -- a silently dropped progress call
+    // would leave a live results screen stuck at "3 of 5" forever.
+    expect(seen).toHaveLength(5)
+    expect(seen).toEqual(expect.arrayContaining(['dm0', 'dm1', 'dm2', 'dm3', 'dm4']))
   })
 
   it('preserves what already succeeded when the token dies mid-run', async () => {
@@ -108,22 +133,79 @@ describe('deleteRegistration', () => {
       if (calls > 1) throw new Unauthorized(401, 'authError', '')
       return 'deleted' as const
     })
-    const out = await deleteRegistration(apiWith(deleteEvent), evs(3), () => {}, RETRY, 1)
+    const out = await deleteRegistration(stubApi({ deleteEvent }), evs(3), () => {}, RETRY, 1)
     expect(out[0]?.outcome).toBe('deleted')
     expect(out.slice(1).every((r) => r.outcome === 'failed')).toBe(true)
   })
 
   it('reports each item once, as it lands, and returns them in input order', async () => {
     const seen: string[] = []
-    const api = apiWith(vi.fn(async () => 'deleted' as const))
-    const out = await deleteRegistration(api, evs(3), (r) => seen.push(r.event.id), RETRY)
+    const deleteEvent = vi.fn(async () => 'deleted' as const)
+    const out = await deleteRegistration(
+      stubApi({ deleteEvent }),
+      evs(3),
+      (r) => seen.push(r.event.id),
+      RETRY,
+    )
     expect(seen).toHaveLength(3)
     expect(out.map((r) => r.event.id)).toEqual(['dm0', 'dm1', 'dm2'])
   })
 
+  it('keeps every row aligned with its own event when a mixed run lands out of order', async () => {
+    // All nine other tests use mocks that resolve identically and instantly,
+    // so completion order coincidentally equals input order every time --
+    // which means a "simpler" refactor that just appends results as they
+    // land, instead of writing them into their original slot, would pass
+    // every one of them. This test forces genuinely different completion
+    // times so that refactor is observably wrong: dm2 answers fastest, dm0
+    // second, and dm1 slowest because it's rate-limited on every attempt and
+    // really sleeps between them.
+    const byId: Record<string, () => Promise<'deleted' | 'alreadyGone'>> = {
+      dm0: async () => {
+        await sleep(30)
+        return 'deleted' as const
+      },
+      dm1: async () => {
+        await sleep(20)
+        throw new RateLimited(429, 'rateLimitExceeded', '')
+      },
+      dm2: async () => {
+        await sleep(1)
+        return 'alreadyGone' as const
+      },
+    }
+    const deleteEvent = vi.fn(async (id: string) => {
+      const handler = byId[id]
+      if (!handler) throw new Error(`unexpected id: ${id}`)
+      return handler()
+    })
+    const seen: string[] = []
+    const out = await deleteRegistration(
+      stubApi({ deleteEvent }),
+      evs(3),
+      (r) => seen.push(r.event.id),
+      RETRY,
+    )
+    // Every id was targeted exactly once each attempt; dm1 is retried up to
+    // RETRY.attempts times, so check the set of distinct ids touched rather
+    // than a call count.
+    expect(new Set(deleteEvent.mock.calls.map((c) => c[0]))).toEqual(new Set(['dm0', 'dm1', 'dm2']))
+    // Observed empirically: dm2 (~1ms) lands first, dm0 (~30ms) second, and
+    // dm1 last because it retries three times (~20ms per attempt, no backoff
+    // delay since RETRY.sleep is a no-op) before it gives up. This is the
+    // proof that "as it lands" and "in input order" are different orderings
+    // for the same run.
+    expect(seen).toEqual(['dm2', 'dm0', 'dm1'])
+    expect(out.map((r): [string, DeleteResult['outcome']] => [r.event.id, r.outcome])).toEqual([
+      ['dm0', 'deleted'],
+      ['dm1', 'failed'],
+      ['dm2', 'alreadyGone'],
+    ])
+  })
+
   it('does nothing when given no events', async () => {
     const deleteEvent = vi.fn()
-    const out = await deleteRegistration(apiWith(deleteEvent), [], () => {}, RETRY)
+    const out = await deleteRegistration(stubApi({ deleteEvent }), [], () => {}, RETRY)
     expect(out).toEqual([])
     expect(deleteEvent).not.toHaveBeenCalled()
   })
@@ -146,7 +228,7 @@ describe('deleteRegistration', () => {
     }
     const deleteEvent = vi.fn(async () => 'deleted' as const)
     await expect(
-      deleteRegistration(apiWith(deleteEvent), evs(1), onProgress, RETRY),
+      deleteRegistration(stubApi({ deleteEvent }), evs(1), onProgress, RETRY),
     ).rejects.toThrow('render exploded')
     expect(seen).toHaveLength(1)
     expect(seen[0]?.outcome).toBe('deleted')
