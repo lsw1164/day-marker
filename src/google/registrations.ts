@@ -226,8 +226,19 @@ export async function deleteRegistration(
       result = { event, outcome }
     } catch (error) {
       // Losing the token invalidates every remaining delete, so stop scheduling.
-      if (error instanceof Unauthorized) halted = true
-      result = { event, outcome: 'failed', error: describeError(error) }
+      if (error instanceof Unauthorized) {
+        halted = true
+        // Stamp the trigger too, not just the items queued behind it. At
+        // concurrency 3 a run of 3 or fewer events has nothing queued behind
+        // the item that 401'd, so without this a halt on a small run would
+        // leave no DELETE_HALTED anywhere in the results -- and ui/'s
+        // reconnect path, which looks for that sentinel, would never fire.
+        // Losing the raw 401 text here costs nothing: it is exactly the
+        // string ui/ already refuses to show a user.
+        result = { event, outcome: 'failed', error: DELETE_HALTED }
+      } else {
+        result = { event, outcome: 'failed', error: describeError(error) }
+      }
     }
     onProgress(result)
     return result

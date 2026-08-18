@@ -98,8 +98,16 @@ describe('deleteRegistration', () => {
   })
 
   it('halts after a 401 and stops sending doomed requests', async () => {
-    // FIVE events against a concurrency of 3. The halt can only short-circuit
-    // items still QUEUED, so a 3-item version asserts something impossible.
+    // FIVE events against a concurrency of 3. The three initial workers all
+    // claim their indices, and hence all make their own real attempt, before
+    // any of them can observe another's failure -- so when the underlying
+    // cause is a dead token, all three independently get a real 401, not
+    // just whichever one happens to set `halted` first. All three are
+    // stamped DELETE_HALTED for the same reason the two never-attempted rows
+    // (dm3, dm4) are: the run halted on a dead token, and DELETE_HALTED
+    // records that fact about the run, not merely "this item was skipped".
+    // Only two events (dm3, dm4) are ever attributed to being *unattempted*,
+    // which the deleteEvent-call-count assertion below still pins.
     const deleteEvent = vi.fn(async () => {
       throw new Unauthorized(401, 'authError', '')
     })
@@ -113,17 +121,43 @@ describe('deleteRegistration', () => {
     expect(out).toHaveLength(5)
     expect(out.every((r) => r.outcome === 'failed')).toBe(true)
     const halted = out.filter((r) => r.error === DELETE_HALTED)
-    expect(halted).toHaveLength(2)
-    // The two never-attempted rows must still be attributed to the right
-    // events (dm3 and dm4, the ones still queued behind concurrency 3), not
-    // to whichever event happened to trip the halt.
-    expect(halted.map((r) => r.event.id).sort()).toEqual(['dm3', 'dm4'])
+    expect(halted).toHaveLength(5)
+    expect(halted.map((r) => r.event.id).sort()).toEqual(['dm0', 'dm1', 'dm2', 'dm3', 'dm4'])
+    // The three initial workers each make exactly one real attempt; dm3 and
+    // dm4 never call deleteEvent at all -- that is the actual, narrower claim
+    // "stops sending doomed requests" makes, and it is unaffected by which
+    // string ends up in `error`.
     expect(deleteEvent).toHaveBeenCalledTimes(3)
     // onProgress must still fire for every one of the five events, including
     // the two that were never attempted -- a silently dropped progress call
     // would leave a live results screen stuck at "3 of 5" forever.
     expect(seen).toHaveLength(5)
     expect(seen).toEqual(expect.arrayContaining(['dm0', 'dm1', 'dm2', 'dm3', 'dm4']))
+  })
+
+  it('stamps DELETE_HALTED on a halt with nothing queued behind it', async () => {
+    // At concurrency 3, a run of 3 or fewer events has nothing left queued
+    // once the initial workers claim every index -- so before this fix, a
+    // halt on a small registration produced only raw 401 text and no
+    // DELETE_HALTED anywhere, silently disabling ui/'s reconnect path for
+    // exactly the registrations most likely to have drifted out of sync
+    // with the calendar (few events left to delete because most were
+    // already removed by hand).
+    const deleteEvent = vi.fn(async () => {
+      throw new Unauthorized(401, 'authError', '')
+    })
+    const out = await deleteRegistration(stubApi({ deleteEvent }), evs(3), () => {}, RETRY)
+    expect(out.every((r) => r.outcome === 'failed')).toBe(true)
+    expect(out.some((r) => r.error === DELETE_HALTED)).toBe(true)
+  })
+
+  it('stamps DELETE_HALTED on a halted single-event run', async () => {
+    const deleteEvent = vi.fn(async () => {
+      throw new Unauthorized(401, 'authError', '')
+    })
+    const out = await deleteRegistration(stubApi({ deleteEvent }), evs(1), () => {}, RETRY)
+    expect(out[0]?.outcome).toBe('failed')
+    expect(out[0]?.error).toBe(DELETE_HALTED)
   })
 
   it('preserves what already succeeded when the token dies mid-run', async () => {
