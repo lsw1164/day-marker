@@ -30,9 +30,15 @@ function labelFor(milestoneKey: string): string {
   return milestoneKey
 }
 
+/**
+ * The per-event accumulator, carrying `summary` only until the title is read
+ * from the earliest-dated event -- `RegistrationEvent` itself has no summary
+ * field, since nothing downstream needs it.
+ */
+type Attributed = RegistrationEvent & { summary?: string }
+
 export function groupByStartDate(events: GoogleEvent[]): Registration[] {
-  const groups = new Map<CalendarDate, RegistrationEvent[]>()
-  const titles = new Map<CalendarDate, string | undefined>()
+  const groups = new Map<CalendarDate, Attributed[]>()
 
   for (const event of events) {
     const props = event.extendedProperties?.private
@@ -44,9 +50,13 @@ export function groupByStartDate(events: GoogleEvent[]): Registration[] {
     if (!date || !isCalendarDate(date)) continue
 
     const list = groups.get(start) ?? []
-    list.push({ id: event.id, date, label: labelFor(props?.milestoneKey ?? '') })
+    list.push({
+      id: event.id,
+      date,
+      label: labelFor(props?.milestoneKey ?? ''),
+      summary: event.summary,
+    })
     groups.set(start, list)
-    if (!titles.has(start)) titles.set(start, event.summary)
   }
 
   return [...groups.entries()]
@@ -54,9 +64,12 @@ export function groupByStartDate(events: GoogleEvent[]): Registration[] {
       const sorted = [...list].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
       return {
         startDate,
-        // The first event's summary shows the user's label if they set one, with
-        // no extra field stamped and nothing to migrate for existing events.
-        title: titles.get(startDate) ?? formatLong(startDate),
+        // Google's events.list sets no orderBy, so input order is arbitrary.
+        // Titling from the earliest-dated event keeps a registration from
+        // renaming itself between loads depending on API response order.
+        // `sorted[0]` covers both an empty summary and (impossibly) an empty
+        // group in one expression.
+        title: sorted[0]?.summary ?? formatLong(startDate),
         count: sorted.length,
         events: sorted,
       }
