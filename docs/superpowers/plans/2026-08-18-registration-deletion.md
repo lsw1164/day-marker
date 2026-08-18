@@ -1478,7 +1478,7 @@ Add `import { Unauthorized } from '@/google/errors'` to the file's imports.
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `npm test -- registrations`
-Expected: FAIL — `listRegistrations is not exported`.
+Expected: FAIL — `TypeError: listRegistrations is not a function`. The cause is the missing export, but it surfaces at call time rather than at module resolution, because Vite resolves the module fine and only the binding is absent.
 
 - [ ] **Step 3: Implement it**
 
