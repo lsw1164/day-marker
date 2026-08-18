@@ -57,6 +57,23 @@ describe('COPY.reminderLabels', () => {
   })
 })
 
+describe('COPY.deleteSummary', () => {
+  // Literal strings, not a call to COPY.deleteSummary itself: a caller that
+  // builds its "expected" text by calling the very function under test can
+  // never catch a mutation inside that function -- both sides move together.
+  it('reports only what happened, one clause per non-zero outcome', () => {
+    expect(COPY.deleteSummary(2, 0, 0)).toBe('2 deleted')
+  })
+
+  it('joins every non-zero outcome, including a failure', () => {
+    expect(COPY.deleteSummary(1, 1, 1)).toBe('1 deleted · 1 already gone · 1 failed')
+  })
+
+  it('omits a zero failed count rather than reporting "0 failed"', () => {
+    expect(COPY.deleteSummary(2, 1, 0)).toBe('2 deleted · 1 already gone')
+  })
+})
+
 describe('outcomeLabel', () => {
   it.each([
     ['added', 'Added'],

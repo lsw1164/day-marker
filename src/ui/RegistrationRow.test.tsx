@@ -73,6 +73,23 @@ describe('RegistrationRow — confirming', () => {
     expect(screen.getByText('2 Years')).toBeInTheDocument()
   })
 
+  it('renders all 46 events of a ten-year registration, not just a four-row preview', () => {
+    // The fixture above has only 3 events, so `registration.events.slice(0, 4)`
+    // -- ResultSummary's own truncation pattern, sitting in the same directory
+    // -- would pass the test above just as well as showing everything. A
+    // ten-year registration is 46 rows, and the spec is emphatic that none of
+    // them may be hidden behind an "and N more".
+    const manyEvents = Array.from({ length: 46 }, (_, i) => ({
+      id: `e${i}`,
+      date: calendarDate('2025-06-21'),
+      label: `Event ${i}`,
+    }))
+    const bigReg: Registration = { ...REG, count: manyEvents.length, events: manyEvents }
+    renderRow({ registration: bigReg, state: 'confirming' })
+    expect(screen.getAllByText(/^Event \d+$/)).toHaveLength(46)
+    expect(screen.getByText('Event 45')).toBeInTheDocument()
+  })
+
   it('marks exactly the past events, with today excluded from the count', () => {
     // Against TODAY of 2026-06-01: Day 100 (2025-06-21) and 1 Year (2026-03-14)
     // are past; 2 Years (2027-03-14) is not, and neither is an event landing
@@ -226,5 +243,54 @@ describe('RegistrationRow — deleting and done', () => {
       ],
     })
     expect(screen.getByText(COPY.deleteSummary(2, 1, 0))).toBeInTheDocument()
+  })
+
+  it('reports a non-zero failed count when a delete actually failed', () => {
+    // Every other 'done' fixture in this file uses deleteSummary(2, 1, 0) --
+    // zero failed -- so a component that hardcoded `const failed = 0`, or
+    // dropped the failed-count clause from COPY.deleteSummary, would pass
+    // every one of them while silently reporting a failed delete as clean.
+    renderRow({
+      state: 'done',
+      results: [
+        { event: REG.events[0]!, outcome: 'deleted' },
+        { event: REG.events[1]!, outcome: 'failed', error: 'boom' },
+        { event: REG.events[2]!, outcome: 'failed', error: 'boom' },
+      ],
+    })
+    expect(screen.getByText(COPY.deleteSummary(1, 0, 2))).toBeInTheDocument()
+  })
+
+  it('attributes each outcome by event id, even when two events share a label', () => {
+    // Every fixture elsewhere in this file gives each event a unique label, so
+    // keying the attribution map on the label instead of the id would survive
+    // them all. labelFor returns '' for an event missing its milestoneKey
+    // stamp, so two such events in one registration is a real way to collide
+    // -- forced here directly, since what matters is the map's key, not how a
+    // duplicate label comes about.
+    const dupLabel: Registration = {
+      ...REG,
+      count: 2,
+      events: [
+        { id: 'x', date: calendarDate('2025-06-21'), label: 'Day 100' },
+        { id: 'y', date: calendarDate('2026-03-14'), label: 'Day 100' },
+      ],
+    }
+    renderRow({
+      registration: dupLabel,
+      state: 'done',
+      results: [
+        { event: dupLabel.events[0]!, outcome: 'deleted' },
+        { event: dupLabel.events[1]!, outcome: 'failed', error: 'boom' },
+      ],
+    })
+    const rows = screen.getAllByText('Day 100').map((el) => {
+      const li = el.closest('li')
+      if (!li) throw new Error('no <li> ancestor for "Day 100"')
+      return li
+    })
+    expect(rows).toHaveLength(2)
+    expect(within(rows[0]!).getByText(COPY.outcomeDeleted)).toBeInTheDocument()
+    expect(within(rows[1]!).getByText(COPY.outcomeFailed)).toBeInTheDocument()
   })
 })
