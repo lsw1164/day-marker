@@ -22,15 +22,19 @@ export interface Registration {
 }
 
 /** `d100` → `Day 100`, `y1` → `1 Year`, `y2` → `2 Years`. */
-function labelFor(milestoneKey: string): string {
+export function labelFor(milestoneKey: string): string {
   const rest = milestoneKey.slice(1)
   // Require digits rather than trusting Number(): Number('') is 0, so a bare
   // 'd' would otherwise render as "Day 0" -- a fabricated label, worse than an
-  // honest blank, on a screen that asks the user to confirm a deletion.
+  // honest blank, on a screen that asks the user to confirm a deletion. The
+  // digits are never routed through Number for display either, even once
+  // validated: Number('99999999999999999999') rounds to
+  // 100000000000000000000, a fabricated renumbering for an implausibly long
+  // run. Echoing the raw digit string also keeps a padded key like `d007`
+  // honest ("Day 007") instead of silently renumbering it to "Day 7".
   if (!/^\d+$/.test(rest)) return milestoneKey
-  const n = Number(rest)
-  if (milestoneKey.startsWith('d')) return `Day ${n}`
-  if (milestoneKey.startsWith('y')) return n === 1 ? '1 Year' : `${n} Years`
+  if (milestoneKey.startsWith('d')) return `Day ${rest}`
+  if (milestoneKey.startsWith('y')) return rest === '1' ? '1 Year' : `${rest} Years`
   return milestoneKey
 }
 

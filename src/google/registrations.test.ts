@@ -125,6 +125,16 @@ describe('groupByStartDate', () => {
     ])
   })
 
+  it('does not lose precision for an implausibly long digit run', () => {
+    // Number('99999999999999999999') rounds to 100000000000000000000 --
+    // float precision silently renumbering the label. Never route the
+    // digits through Number for display.
+    const out = groupByStartDate([
+      ev('a', '2025-03-14', 'd99999999999999999999', '2025-06-21'),
+    ])
+    expect(out[0]?.events[0]?.label).toBe('Day 99999999999999999999')
+  })
+
   it('does not invent a number for a truncated milestone key', () => {
     const out = groupByStartDate([
       ev('a', '2025-03-14', 'd', '2025-06-21'),
