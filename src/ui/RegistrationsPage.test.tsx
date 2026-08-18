@@ -165,4 +165,45 @@ describe('RegistrationsPage', () => {
     await userEvent.click(within(rowB).getByRole('button', { name: COPY.deleteOpen }))
     expect(within(rowB).getByRole('button', { name: COPY.deleteCancel })).toHaveFocus()
   })
+
+  it('returns focus to the row’s own Delete… button on Cancel', async () => {
+    // Cancelling drops the row back to 'list', which unmounts Cancel/Confirm
+    // and remounts Delete… -- without an explicit focus move the browser
+    // drops focus to <body>, same as the entry direction.
+    render(<RegistrationsPage deps={deps(TWO)} checkGisReady={ready} todayDate={TODAY} />)
+    const rowB = await rowFor(TITLE_B)
+    await userEvent.click(within(rowB).getByRole('button', { name: COPY.deleteOpen }))
+    await userEvent.click(within(rowB).getByRole('button', { name: COPY.deleteCancel }))
+    expect(within(rowB).getByRole('button', { name: COPY.deleteOpen })).toHaveFocus()
+  })
+
+  it('focuses the Back to registrations button once a delete completes', async () => {
+    // 'done' removes the row's own Cancel/Confirm controls entirely; the next
+    // actionable control on screen is the page's own Back button.
+    render(<RegistrationsPage deps={deps(TWO)} checkGisReady={ready} todayDate={TODAY} />)
+    const rowB = await rowFor(TITLE_B)
+    await userEvent.click(within(rowB).getByRole('button', { name: COPY.deleteOpen }))
+    await userEvent.click(within(rowB).getByRole('button', { name: COPY.deleteConfirm(2) }))
+    await waitFor(() =>
+      expect(within(rowB).getByText(COPY.deleteSummary(2, 0, 0))).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: COPY.deleteBack })).toHaveFocus()
+  })
+
+  it('focuses the refreshed list after Back to registrations, not the document top', async () => {
+    const d = deps(TWO)
+    const listEvents = d.api.listEvents as ReturnType<typeof vi.fn>
+    render(<RegistrationsPage deps={d} checkGisReady={ready} todayDate={TODAY} />)
+    const rowB = await rowFor(TITLE_B)
+    // From here on, the calendar no longer has B -- it was just deleted.
+    listEvents.mockImplementation(async () => ({ items: REG_A }))
+    await userEvent.click(within(rowB).getByRole('button', { name: COPY.deleteOpen }))
+    await userEvent.click(within(rowB).getByRole('button', { name: COPY.deleteConfirm(2) }))
+    await waitFor(() =>
+      expect(within(rowB).getByText(COPY.deleteSummary(2, 0, 0))).toBeInTheDocument(),
+    )
+    await userEvent.click(screen.getByRole('button', { name: COPY.deleteBack }))
+    await waitFor(() => expect(screen.queryByText(TITLE_B)).not.toBeInTheDocument())
+    expect(screen.getByRole('list')).toHaveFocus()
+  })
 })

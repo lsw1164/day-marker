@@ -32,7 +32,15 @@ export function RegistrationsPage({
   const state = useRegistrations(deps)
   const [gisReady, setGisReady] = useState<boolean | null>(null)
   const listRef = useRef<HTMLUListElement>(null)
+  const emptyRef = useRef<HTMLParagraphElement>(null)
+  const retryRef = useRef<HTMLButtonElement>(null)
+  const backToListRef = useRef<HTMLButtonElement>(null)
   const previousConfirming = useRef<CalendarDate | null>(null)
+  const previousPhase = useRef(state.phase)
+  // Set when an exit needs to land on whatever the list settles into *after*
+  // a refetch, not on what is on screen the instant the exit happens -- see
+  // the second effect below for why that distinction matters.
+  const pendingListFocus = useRef(false)
 
   useEffect(() => {
     let live = true
@@ -44,27 +52,77 @@ export function RegistrationsPage({
     }
   }, [checkGisReady])
 
-  // The row that owns `confirming` unmounts its own "Delete…" button the
-  // instant it opens (RegistrationRow swaps it for Cancel/Confirm), and the
-  // browser's default on losing the focused element is to drop focus to
-  // <body> -- a keyboard user would land at the top of the document mid-flow,
-  // on a destructive action, with nothing telling them what changed. Moving
-  // focus to the newly-mounted Cancel button belongs here, not in
-  // RegistrationRow: by the time a row can move focus onto itself, the
-  // element focus needs to move *from* is already gone from the DOM, and
-  // RegistrationRow has no way to know whether it is opening for the first
-  // time or merely re-rendering mid-delete. Keyed on `confirming` actually
-  // changing (not merely truthy) so this fires once per open/retarget, never
-  // on every progress update while a delete runs.
+  function focusRowControl(startDate: CalendarDate | null) {
+    if (startDate === null) return
+    const index = state.registrations.findIndex((r) => r.startDate === startDate)
+    const row = listRef.current?.querySelectorAll('li')[index]
+    // Whichever button a row shows first -- Cancel while open, Delete… while
+    // closed -- is always the one this needs: RegistrationRow never renders
+    // more than one button ahead of it in either state.
+    row?.querySelector<HTMLButtonElement>('button')?.focus()
+  }
+
+  // The active row unmounts a control every time it changes state --
+  // "Delete…" the instant it opens, Cancel/Confirm the instant it closes or
+  // finishes -- and the browser's default on losing the focused element is
+  // to drop focus to <body>. A keyboard user would be dropped to the top of
+  // the document mid-flow, on a destructive action, with nothing telling
+  // them what changed. This belongs here, not in RegistrationRow: by the
+  // time a row could move focus onto itself, the element focus needs to move
+  // *from* is already gone from the DOM, and RegistrationRow has no way to
+  // know why it is re-rendering. Three transitions, each keyed off
+  // `confirming` and `phase` actually changing (never merely truthy) so none
+  // of them re-fire on every progress tick while a delete runs:
   useEffect(() => {
-    const confirming = state.confirming
-    if (confirming !== null && confirming !== previousConfirming.current) {
-      const index = state.registrations.findIndex((r) => r.startDate === confirming)
-      const row = listRef.current?.querySelectorAll('li')[index]
-      row?.querySelector<HTMLButtonElement>('button')?.focus()
+    const { confirming, phase } = state
+    const prevConfirming = previousConfirming.current
+    const prevPhase = previousPhase.current
+
+    if (confirming !== null && confirming !== prevConfirming) {
+      // Entry: opened for the first time, or retargeted onto a different row.
+      focusRowControl(confirming)
+    } else if (confirming === null && prevConfirming !== null) {
+      if (prevPhase === 'done') {
+        // Exit via "Back to registrations": what replaces this row (fresh
+        // data, possibly with this row gone entirely) is not decided yet --
+        // refresh() was just requested and may pass through a 'loading'
+        // render first. Defer to the second effect below rather than
+        // grabbing a container that a 'loading' render is about to replace.
+        pendingListFocus.current = true
+      } else {
+        // Exit via Cancel: return focus to the row's own trigger, the
+        // control that opened this flow and the one the row shows again now
+        // that it is back in 'list' state.
+        focusRowControl(prevConfirming)
+      }
+    } else if (confirming !== null && phase === 'done' && prevPhase !== 'done') {
+      // Completion: 'done' removes the row's own Cancel/Confirm entirely, so
+      // the next actionable control on screen is the page's own Back button.
+      backToListRef.current?.focus()
     }
+
     previousConfirming.current = confirming
-  }, [state.confirming, state.registrations])
+    previousPhase.current = phase
+  }, [state.confirming, state.phase, state.registrations])
+
+  // Consumes the pending focus set above once the refetch it is waiting on
+  // has actually settled -- 'loading' may render (and unmount the very
+  // container the first effect could have grabbed) before the fresh data
+  // lands, so this holds off until `phase` leaves 'loading'. Falls through
+  // list -> empty -> retry so a keyboard user still lands somewhere
+  // actionable if the refetch itself comes back empty or fails, rather than
+  // silently doing nothing. Reset on disconnect so a stale request from a
+  // halted run cannot fire later against an unrelated reconnect-and-reload.
+  useEffect(() => {
+    if (!state.connected) {
+      pendingListFocus.current = false
+      return
+    }
+    if (pendingListFocus.current && state.phase !== 'loading') {
+      pendingListFocus.current = false
+      ;(listRef.current ?? emptyRef.current ?? retryRef.current)?.focus()
+    }
+  }, [state.phase, state.connected])
 
   // Gated so this can never coexist with a RegistrationRow's own confirm or
   // summary Alert -- getByRole('alert') throws on more than one match. In
@@ -125,7 +183,12 @@ export function RegistrationsPage({
         // already in flight: listView reads 'loading' then, not 'blocked',
         // since a fresh fetch always takes priority (see the listView
         // derivation above).
-        <Button variant="outline" className="min-h-11" onClick={() => state.refresh()}>
+        <Button
+          ref={retryRef}
+          variant="outline"
+          className="min-h-11"
+          onClick={() => state.refresh()}
+        >
           {COPY.listRetry}
         </Button>
       )}
@@ -145,10 +208,18 @@ export function RegistrationsPage({
       ) : listView === 'loading' ? (
         <p className="text-sm text-muted-foreground">{COPY.registrationsLoading}</p>
       ) : listView === 'empty' ? (
-        <p className="text-sm text-muted-foreground">{COPY.registrationsEmpty}</p>
+        // tabIndex so a keyboard user landing here after "Back to
+        // registrations" refreshes into an empty list has somewhere to land
+        // other than the document top -- see the pendingListFocus effect.
+        <p ref={emptyRef} tabIndex={-1} className="text-sm text-muted-foreground">
+          {COPY.registrationsEmpty}
+        </p>
       ) : listView === 'list' ? (
         <>
-          <ul ref={listRef} className="flex flex-col gap-2">
+          {/* tabIndex so the pendingListFocus effect above has somewhere to
+              land a keyboard user after "Back to registrations" refreshes
+              this list, rather than the document top. */}
+          <ul ref={listRef} tabIndex={-1} className="flex flex-col gap-2">
             {state.registrations.map((registration) => {
               const active = state.confirming === registration.startDate
               return (
@@ -174,7 +245,12 @@ export function RegistrationsPage({
             })}
           </ul>
           {state.phase === 'done' && (
-            <Button variant="secondary" className="min-h-11" onClick={state.backToList}>
+            <Button
+              ref={backToListRef}
+              variant="secondary"
+              className="min-h-11"
+              onClick={state.backToList}
+            >
               {COPY.deleteBack}
             </Button>
           )}
