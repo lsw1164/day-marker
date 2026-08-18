@@ -34,7 +34,9 @@ export function labelFor(milestoneKey: string): string {
   // honest ("Day 007") instead of silently renumbering it to "Day 7".
   if (!/^\d+$/.test(rest)) return milestoneKey
   if (milestoneKey.startsWith('d')) return `Day ${rest}`
-  if (milestoneKey.startsWith('y')) return rest === '1' ? '1 Year' : `${rest} Years`
+  // Test the string, not Number(rest), so a 20-digit key keeps its digits --
+  // but match a padded one too, or y01 loses its singular.
+  if (milestoneKey.startsWith('y')) return /^0*1$/.test(rest) ? `${rest} Year` : `${rest} Years`
   return milestoneKey
 }
 

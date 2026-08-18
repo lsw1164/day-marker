@@ -130,11 +130,17 @@ describe('groupByStartDate', () => {
   it('does not lose precision for an implausibly long digit run', () => {
     // Number('99999999999999999999') rounds to 100000000000000000000 --
     // float precision silently renumbering the label. Never route the
-    // digits through Number for display.
+    // digits through Number for display. Both branches are pinned
+    // separately: fixing only the `d` branch (as an earlier round did)
+    // leaves the same bug reachable through `y`.
     const out = groupByStartDate([
       ev('a', '2025-03-14', 'd99999999999999999999', '2025-06-21'),
+      ev('b', '2025-03-14', 'y99999999999999999999', '2026-03-14'),
     ])
-    expect(out[0]?.events[0]?.label).toBe('Day 99999999999999999999')
+    expect(out[0]?.events.map((e) => e.label)).toEqual([
+      'Day 99999999999999999999',
+      '99999999999999999999 Years',
+    ])
   })
 
   it('does not invent a number for a truncated milestone key', () => {
@@ -216,6 +222,21 @@ describe('labelFor', () => {
     for (const m of computeMilestones(calendarDate('2025-03-14'), 3)) {
       expect(labelFor(m.key)).toBe(m.label)
     }
+  })
+
+  it('keeps a zero-padded one year singular', () => {
+    // Pluralising on `rest === '1'` rather than a value-aware check means a
+    // zero-padded one no longer reads as singular. Digit fidelity is kept
+    // either way (echoing '01', not renumbering to '1'); only Year/Years
+    // should change.
+    expect(labelFor('y01')).toBe('01 Year')
+  })
+
+  it('returns a blank label for an absent milestone key', () => {
+    // A deliberate earlier ruling: an event with no milestoneKey stamp
+    // renders a blank label rather than a fabricated one. Held by a test
+    // rather than by memory of having ruled it.
+    expect(labelFor('')).toBe('')
   })
 })
 
