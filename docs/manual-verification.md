@@ -1,9 +1,12 @@
 # Manual verification
 
-The unit suite mocks `fetch`, so these five behaviours can only be confirmed
-against a real Google Calendar. Run through them after any change to
-`src/domain/eventPayload.ts`, `src/google/apply.ts`, or `src/google/plan.ts` —
-and before any deploy that includes such a change.
+The unit suite mocks `fetch`, so checks 1–5 can only be confirmed against a real
+Google Calendar. Run them after any change to `src/domain/eventPayload.ts`,
+`src/google/apply.ts`, or `src/google/plan.ts`.
+
+Checks 6–10 cover things a mocked, jsdom-based suite cannot see at all: a
+pre-paint script, native browser chrome, a real deployed host, and a real
+Google popup. Run the full ten before any deploy.
 
 **This checklist has not yet been run.** Append an entry to the log at the bottom
 every time it is: record the date, who ran it, and the result of each check. On a
@@ -96,6 +99,61 @@ without creating a duplicate.
   `transparency` should be set identically both ways; a difference between the
   two paths would narrow down where it's being lost.
 
+## 6. No flash of the wrong theme
+
+The theme class is applied by an inline script in `index.html`, before first
+paint. A React-time application would flash the wrong colours on every load, and
+no unit test can see this because the script lives outside vitest.
+
+- Set your OS to dark. Hard-refresh the app.
+- **Expect:** it is dark from the first painted frame. Record any white flash,
+  however brief.
+
+## 7. Native controls respect the theme
+
+The app deliberately uses a native `<input type="date">` and `<select>` because
+the base-ui equivalents are untestable under jsdom. Native controls are
+user-agent styled, so they only follow the theme if `color-scheme` is applied.
+
+- With a dark theme active, open the start-date picker, then the Range dropdown.
+- **Expect:** both render dark. A light picker on a dark page means
+  `color-scheme` is not reaching them — record which control and which theme.
+
+## 8. Deep links survive a refresh
+
+- With the app **deployed** (not the dev server), navigate to Registrations, then
+  hard-refresh the page.
+- **Expect:** the page loads. A 404 means the host rewrite from the README's
+  Deploying section is missing — record the host and what you configured.
+
+## 9. The sign-in popup is not blocked
+
+Google Identity Services only opens its popup if `requestAccessToken` is reached
+inside the user's gesture, before any `await`. Both hooks do this correctly, but
+**no unit test can see a regression**: every test stubs auth, so inserting an
+`await` before the call leaves the whole suite green. This was verified by mutation
+during the Task 8 review — the mutant passed all 296 tests.
+
+- From a cold load, click **Connect** on the main screen. Then repeat from the
+  Registrations tab.
+- **Expect:** Google's account chooser opens both times. A silent no-op, or a
+  browser "popup blocked" indicator, means an `await` crept in ahead of the token
+  request — record which screen.
+
+## 10. Delete, then re-register
+
+This is the deliberate version of check 4, and it decides whether the app needs
+an ID-versioning escape hatch.
+
+- Register a start date, then delete that registration from the Registrations tab.
+- Immediately re-register the same start date.
+- **Expect:** the events return. Record which route it took — the milestones
+  showing as `Deleted` and reporting `Restored`, or showing as `New` and
+  reporting `Updated` via the 409 fallback. Both are correct.
+- **If it reports `Failed`:** record the exact error. That is the documented
+  unknown — Google purged the events and refused to reuse their IDs — and it is
+  the evidence needed to decide on ID versioning.
+
 ## Log
 
 No runs recorded yet. Append one line per run in this format, keeping failed
@@ -105,5 +163,9 @@ as the current state:
 ```
 YYYY-MM-DD — <name> — 1: <pass|fail> — 2: <pass|fail> — 3: <pass|fail> —
 4: <pass|fail, and which badge/outcome you saw> — 5: <pass|fail> —
+6: <pass|fail> — 7: <pass|fail, and which control/theme if it failed> —
+8: <pass|fail, and which host if it failed> —
+9: <pass|fail, and which screen if it failed> —
+10: <pass|fail, and which route it took, or the exact error if Failed> —
 notes: <anything from a "record" bullet above, or "none">
 ```

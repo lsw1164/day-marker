@@ -19,6 +19,16 @@ Day counting follows the Korean convention: the start date is day 1, so Day 100 
 99 days after it, not 100. Year milestones use the same month and day N years later,
 not 365-day multiples.
 
+Day Marker follows your system's light or dark setting. The header's theme button
+cycles system → light → dark; an explicit choice is remembered in `localStorage`
+under `dayMarker.theme`, and removing it returns to following the system.
+
+The **Registrations** tab lists everything Day Marker has written, found by
+querying your calendar rather than by storing anything: every event carries its
+registration's start date, so the list is grouped from the calendar itself. That
+is why a registration made on another device, or a year ago, still appears.
+Deleting removes the whole registration — past events included.
+
 ## Setup
 
 Requires **Node 20+** and npm — `package.json` declares it under `engines`, and an
@@ -81,10 +91,28 @@ Cloudflare Pages, GitHub Pages). Three required steps:
 
 1. Set `VITE_GOOGLE_CLIENT_ID` in the host's build environment.
 2. Add the deployed origin to **Authorized JavaScript origins** on the OAuth client.
-3. Serve it from a **secure context** (HTTPS, or `localhost`). Event IDs are derived
-   with `crypto.subtle`, which browsers expose only in a secure context, so on a
-   plain-HTTP origin the app dies at the first milestone with "Cannot read
-   properties of undefined (reading 'digest')".
+3. Configure the host's URL rewrite and confirm it serves over a secure context —
+   see the two notes below.
+
+### Clean URLs need a host rewrite
+
+The app uses real routes (`/`, `/registrations`), so the host must serve
+`index.html` for unknown paths. Vite's dev server and `vite preview` do this
+automatically — which means **a missing rewrite works locally and 404s in
+production**. Configure it:
+
+| Host | What to add |
+|---|---|
+| Vercel | `vercel.json` → `{ "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }] }` |
+| Netlify | `public/_redirects` → `/*  /index.html  200` |
+| Cloudflare Pages | `public/_redirects` → `/*  /index.html  200` |
+| GitHub Pages | No rewrite support: copy `dist/index.html` to `dist/404.html` after building |
+
+### The app needs a secure context
+
+`crypto.subtle` is `SecureContext`-only, so serve over HTTPS (or `localhost`).
+On plain HTTP, event-ID generation fails — the app dies at the first milestone
+with "Cannot read properties of undefined (reading 'digest')".
 
 ## Design docs
 
