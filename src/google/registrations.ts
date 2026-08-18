@@ -45,18 +45,33 @@ export function groupByStartDate(events: GoogleEvent[]): Registration[] {
   const groups = new Map<CalendarDate, Attributed[]>()
 
   for (const event of events) {
+    // Google returns cancelled instances of recurring events even with
+    // showDeleted false, when singleEvents is also false -- which is our
+    // config, deliberately (see calendarApi.ts). A hand-added repeat rule on
+    // one of our events would otherwise inflate count and add a phantom
+    // confirm row.
+    if (event.status === 'cancelled') continue
+    // Without an id there is nothing to attribute or, later, to delete: a
+    // missing id would resolve a delete to DELETE /events/undefined.
+    if (!event.id) continue
+
     const props = event.extendedProperties?.private
     const start = props?.startDate
-    const date = event.start?.date
+    // A timed event has dateTime and no date -- toggling "All day" off in the
+    // Calendar UI does that, and our stamps survive it. Slice the calendar date
+    // out rather than parsing: the first 10 characters are the date as the
+    // user sees it in their own timezone, and no Date round-trip means no
+    // offset to get wrong.
+    const own = event.start?.date ?? event.start?.dateTime?.slice(0, 10)
     // An event we cannot attribute to a registration is skipped rather than
     // invented into one: no start date, no date of its own, or either unparseable.
     if (!start || !isCalendarDate(start)) continue
-    if (!date || !isCalendarDate(date)) continue
+    if (!own || !isCalendarDate(own)) continue
 
     const list = groups.get(start) ?? []
     list.push({
       id: event.id,
-      date,
+      date: own,
       label: labelFor(props?.milestoneKey ?? ''),
       summary: event.summary,
     })

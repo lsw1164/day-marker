@@ -9,9 +9,10 @@ export interface GoogleEvent {
   status: 'confirmed' | 'tentative' | 'cancelled'
   summary?: string
   reminders?: { useDefault: boolean; overrides?: { method: string; minutes: number }[] }
-  /** All-day events carry `date`; both fields are optional because a malformed
-   *  response must degrade rather than crash. */
-  start?: { date?: string }
+  /** All-day events carry `date`; a timed event (e.g. "All day" toggled off
+   *  by hand in the Calendar UI) carries `dateTime` instead. Both fields are
+   *  optional because a malformed response must degrade rather than crash. */
+  start?: { date?: string; dateTime?: string }
   /** Where Day Marker stamps dayMarkerVersion, startDate, and milestoneKey. */
   extendedProperties?: { private?: Record<string, string> }
 }

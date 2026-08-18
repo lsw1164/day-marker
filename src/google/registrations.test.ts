@@ -118,12 +118,45 @@ describe('groupByStartDate', () => {
     expect(out).toEqual([])
   })
 
-  it('ignores events with no date of their own', () => {
-    const bad: GoogleEvent = {
-      id: 'a',
+  it('drops an event with no date of its own at all', () => {
+    const e = ev('a', '2025-03-14', 'd100', '2025-06-21')
+    delete (e as { start?: unknown }).start
+    expect(groupByStartDate([e])).toEqual([])
+  })
+
+  it('keeps an event the user switched from all-day to timed', () => {
+    // Toggling "All day" off on one of our events in the Calendar UI is a
+    // one-tap action that swaps `start.date` for `start.dateTime`. Private
+    // extendedProperties survive it, so the event still carries a valid
+    // startDate stamp -- it must not become invisible and undeletable.
+    const e = ev('a', '2025-03-14', 'd100', '2025-06-21')
+    ;(e as { start?: unknown }).start = { dateTime: '2025-06-21T09:00:00+09:00' }
+    const out = groupByStartDate([e])
+    expect(out[0]?.events).toEqual([{ id: 'a', date: '2025-06-21', label: 'Day 100' }])
+  })
+
+  it('ignores an event whose own date is unparseable', () => {
+    expect(groupByStartDate([ev('a', '2025-03-14', 'd100', 'not-a-date')])).toEqual([])
+  })
+
+  it('skips a cancelled event even though it still carries the stamps', () => {
+    // Google returns cancelled instances of recurring events even with
+    // showDeleted false, when singleEvents is also false -- which is our
+    // config. A hand-added repeat rule on one of our events would otherwise
+    // inflate count and add a phantom confirm row.
+    const e = { ...ev('a', '2025-03-14', 'd100', '2025-06-21'), status: 'cancelled' as const }
+    expect(groupByStartDate([e])).toEqual([])
+  })
+
+  it('drops an event with no id', () => {
+    // A later delete would resolve to DELETE /events/undefined otherwise.
+    const bad = {
       status: 'confirmed',
-      extendedProperties: { private: { dayMarkerVersion: '1', startDate: '2025-03-14' } },
-    }
+      start: { date: '2025-06-21' },
+      extendedProperties: {
+        private: { dayMarkerVersion: '1', startDate: '2025-03-14', milestoneKey: 'd100' },
+      },
+    } as unknown as GoogleEvent
     expect(groupByStartDate([bad])).toEqual([])
   })
 
