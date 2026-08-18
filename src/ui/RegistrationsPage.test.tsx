@@ -1,10 +1,11 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { RegistrationsPage } from '@/ui/RegistrationsPage'
 import type { Auth } from '@/google/auth'
 import type { CalendarApi, GoogleEvent } from '@/google/calendarApi'
 import { calendarDate } from '@/domain/calendarDate'
+import { Unauthorized } from '@/google/errors'
 import { COPY } from '@/ui/copy'
 import type { DayMarkerDeps } from '@/ui/useDayMarker'
 
@@ -146,6 +147,20 @@ describe('RegistrationsPage', () => {
     expect(await screen.findByText(TITLE_B)).toBeInTheDocument()
   })
 
+  it('shows the connect prompt, not a retry button, when the token expires mid-listing', async () => {
+    // The spec treats these as two different rows: an expired token routes to
+    // reconnecting, a page of results failing routes to retrying -- and the
+    // retry button would do nothing here anyway, since the load effect
+    // early-returns while disconnected. (The retry-button arm for a non-auth
+    // failure is covered by "offers a retry after a failed load…" above --
+    // together the two tests cover both arms of this branch.)
+    const d = deps(TWO)
+    ;(d.api.listEvents as ReturnType<typeof vi.fn>).mockRejectedValue(new Unauthorized(401, 'authError', ''))
+    render(<RegistrationsPage deps={d} checkGisReady={ready} todayDate={TODAY} />)
+    expect(await screen.findByText(COPY.registrationsConnectPrompt)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: COPY.listRetry })).not.toBeInTheDocument()
+  })
+
   it('shows exactly one alert while confirming a delete', async () => {
     // The confirm warning is itself an alert, so a stray page-level alert would
     // make every getByRole('alert') query ambiguous.
@@ -205,5 +220,61 @@ describe('RegistrationsPage', () => {
     await userEvent.click(screen.getByRole('button', { name: COPY.deleteBack }))
     await waitFor(() => expect(screen.queryByText(TITLE_B)).not.toBeInTheDocument())
     expect(screen.getByRole('list')).toHaveFocus()
+  })
+
+  it('falls through to the empty-state message if the post-refresh list comes back empty', async () => {
+    const d = deps(TWO)
+    const listEvents = d.api.listEvents as ReturnType<typeof vi.fn>
+    render(<RegistrationsPage deps={d} checkGisReady={ready} todayDate={TODAY} />)
+    const rowB = await rowFor(TITLE_B)
+    listEvents.mockImplementation(async () => ({ items: [] }))
+    await userEvent.click(within(rowB).getByRole('button', { name: COPY.deleteOpen }))
+    await userEvent.click(within(rowB).getByRole('button', { name: COPY.deleteConfirm(2) }))
+    await waitFor(() =>
+      expect(within(rowB).getByText(COPY.deleteSummary(2, 0, 0))).toBeInTheDocument(),
+    )
+    await userEvent.click(screen.getByRole('button', { name: COPY.deleteBack }))
+    expect(await screen.findByText(COPY.registrationsEmpty)).toHaveFocus()
+  })
+
+  it('falls through to the retry button if the post-refresh reload itself fails', async () => {
+    const d = deps(TWO)
+    const listEvents = d.api.listEvents as ReturnType<typeof vi.fn>
+    render(<RegistrationsPage deps={d} checkGisReady={ready} todayDate={TODAY} />)
+    const rowB = await rowFor(TITLE_B)
+    listEvents.mockRejectedValue(new Error('reload exploded'))
+    await userEvent.click(within(rowB).getByRole('button', { name: COPY.deleteOpen }))
+    await userEvent.click(within(rowB).getByRole('button', { name: COPY.deleteConfirm(2) }))
+    await waitFor(() =>
+      expect(within(rowB).getByText(COPY.deleteSummary(2, 0, 0))).toBeInTheDocument(),
+    )
+    await userEvent.click(screen.getByRole('button', { name: COPY.deleteBack }))
+    expect(await screen.findByRole('button', { name: COPY.listRetry })).toHaveFocus()
+  })
+
+  it('focuses the Connect button after a halted run and Back to registrations', async () => {
+    // The halted-run exit calls disconnectAfterHalt(), not refresh() -- phase
+    // never re-enters 'loading' here, it just never was in it, and the
+    // list/empty/retry fallthrough chain above does not apply on this branch
+    // at all.
+    const d = deps(TWO)
+    ;(d.api.deleteEvent as ReturnType<typeof vi.fn>).mockRejectedValue(new Unauthorized(401, 'authError', ''))
+    render(<RegistrationsPage deps={d} checkGisReady={ready} todayDate={TODAY} />)
+    const rowB = await rowFor(TITLE_B)
+    await userEvent.click(within(rowB).getByRole('button', { name: COPY.deleteOpen }))
+    await userEvent.click(within(rowB).getByRole('button', { name: COPY.deleteConfirm(2) }))
+    const backButton = await screen.findByRole('button', { name: COPY.deleteBack })
+    await waitFor(() => expect(backButton).toHaveFocus())
+    // React reuses this exact host button node for the Connect button that
+    // replaces it (both sit at the same fragment position), so if this
+    // button already has focus, focus would carry over "for free" even
+    // without the fix under test -- a click via userEvent would refocus this
+    // same node on the way in and recreate that coincidence. Break it
+    // deliberately: blur first, then dispatch a raw click that does not
+    // itself move focus, so only an explicit focus() call in the fix can
+    // make the final assertion pass.
+    backButton.blur()
+    fireEvent.click(backButton)
+    expect(await screen.findByRole('button', { name: COPY.connect })).toHaveFocus()
   })
 })

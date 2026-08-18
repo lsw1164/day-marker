@@ -35,6 +35,7 @@ export function RegistrationsPage({
   const emptyRef = useRef<HTMLParagraphElement>(null)
   const retryRef = useRef<HTMLButtonElement>(null)
   const backToListRef = useRef<HTMLButtonElement>(null)
+  const connectRef = useRef<HTMLButtonElement>(null)
   const previousConfirming = useRef<CalendarDate | null>(null)
   const previousPhase = useRef(state.phase)
   // Set when an exit needs to land on whatever the list settles into *after*
@@ -105,17 +106,31 @@ export function RegistrationsPage({
     previousPhase.current = phase
   }, [state.confirming, state.phase, state.registrations])
 
-  // Consumes the pending focus set above once the refetch it is waiting on
-  // has actually settled -- 'loading' may render (and unmount the very
-  // container the first effect could have grabbed) before the fresh data
-  // lands, so this holds off until `phase` leaves 'loading'. Falls through
-  // list -> empty -> retry so a keyboard user still lands somewhere
-  // actionable if the refetch itself comes back empty or fails, rather than
-  // silently doing nothing. Reset on disconnect so a stale request from a
-  // halted run cannot fire later against an unrelated reconnect-and-reload.
+  // Consumes the pending focus set above once whatever it is waiting on has
+  // actually settled. Two distinct settlements, not one:
+  //
+  // - A halted run's "Back to registrations" calls disconnectAfterHalt(),
+  //   not refresh() -- `phase` is left exactly where it was and never enters
+  //   'loading' at all, and `connected` flips false in the same commit that
+  //   cleared `confirming`. That render already swaps in the connect
+  //   prompt, so the correct target is the Connect button, focused
+  //   explicitly here -- not left to whatever happened to have focus before
+  //   the disconnect. (React reuses the same host button node across that
+  //   swap when the two buttons land at the same fragment position, which
+  //   would otherwise carry focus over by coincidence rather than by design
+  //   -- see the regression test for what that coincidence would hide.)
+  // - A non-halted "Back to registrations" calls refresh(), which does pass
+  //   through 'loading' (and may unmount the very container the first
+  //   effect could have grabbed) before fresh data lands, so this holds off
+  //   until `phase` leaves 'loading', then falls through list -> empty ->
+  //   retry so a keyboard user still lands somewhere actionable even if the
+  //   refetch itself comes back empty or fails.
   useEffect(() => {
     if (!state.connected) {
-      pendingListFocus.current = false
+      if (pendingListFocus.current) {
+        pendingListFocus.current = false
+        connectRef.current?.focus()
+      }
       return
     }
     if (pendingListFocus.current && state.phase !== 'loading') {
@@ -175,7 +190,15 @@ export function RegistrationsPage({
           <AlertDescription>{state.error}</AlertDescription>
         </Alert>
       )}
-      {listView === 'blocked' && (
+      {state.connected && listView === 'blocked' && (
+        // Gated on `connected` too, not just `listView === 'blocked'`: an
+        // Unauthorized listing failure sets `error` and flips `connected`
+        // false in the same path, and the spec treats that as a different
+        // row entirely -- reconnect, not retry. Without this gate the retry
+        // button would render right next to the connect prompt, and
+        // clicking it would do nothing, since the load effect early-returns
+        // while disconnected.
+        //
         // Adjacent to the Alert above rather than lower on the page: some of
         // its copy (paginationLooped's "Please try again") is an instruction
         // with nothing behind it otherwise -- a full browser reload was the
@@ -197,6 +220,7 @@ export function RegistrationsPage({
         <>
           <p className="text-sm text-muted-foreground">{COPY.registrationsConnectPrompt}</p>
           <Button
+            ref={connectRef}
             variant="outline"
             className="min-h-11"
             disabled={gisReady !== true}
