@@ -5,6 +5,12 @@ import type { PlanItem, PlanStatus } from '@/google/plan'
 export const COPY = {
   appName: 'Day Marker',
   tagline: 'Put your milestones on the calendar.',
+  navLabel: 'Sections',
+  navNew: 'New',
+  navRegistrations: 'Registrations',
+  registrationsTitle: 'Registrations',
+  registrationsConnectPrompt:
+    'Connect your Google account to see what Day Marker has registered.',
 
   notConnected: 'Not connected',
   connected: 'Connected',

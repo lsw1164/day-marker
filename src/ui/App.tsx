@@ -65,16 +65,14 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
           : COPY.milestoneCount(state.milestones.length)
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-5 px-4 pb-28 pt-6">
-      <header className="flex items-baseline justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold">{COPY.appName}</h1>
-          <p className="text-xs text-muted-foreground">{COPY.tagline}</p>
-        </div>
-        <span className="shrink-0 text-xs text-muted-foreground">
+    <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-5 px-4 pb-28 pt-5">
+      {/* Identity and nav moved to the shared Header. The connection chip stays
+          here because connecting is page-level. */}
+      <div className="flex justify-end">
+        <span className="text-xs text-muted-foreground">
           {state.connected ? COPY.connected : COPY.notConnected}
         </span>
-      </header>
+      </div>
 
       {/*
         No role="alert" on either Alert below: shadcn's Alert sets it itself, and
