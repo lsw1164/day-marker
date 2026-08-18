@@ -99,13 +99,37 @@ describe('useTheme', () => {
     expect(document.documentElement.classList.contains('dark')).toBe(false)
   })
 
-  it('survives localStorage throwing, as in private browsing', () => {
-    fakeMedia(false)
+  it('re-subscribes to the OS after cycling back to system', () => {
+    const media = fakeMedia(true)
+    const { result } = renderHook(() => useTheme())
+    expect(media.listenerCount()).toBe(1)
+
+    act(() => result.current.setChoice('light'))
+    expect(media.listenerCount()).toBe(0)
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+
+    act(() => result.current.setChoice('dark'))
+    expect(media.listenerCount()).toBe(0)
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+
+    act(() => result.current.setChoice('system'))
+    expect(media.listenerCount()).toBe(1)
+
+    // Back under the OS's control: a flip must reach us again.
+    act(() => media.flip(false))
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+  })
+
+  it('follows the OS when localStorage throws, as in private browsing', () => {
+    fakeMedia(true)
     const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('denied')
     })
     const { result } = renderHook(() => useTheme())
     expect(result.current.choice).toBe('system')
+    // A dark OS discriminates: were the catch to fall back to 'light' instead of
+    // 'system', the choice assertion above would still pass and only this would fail.
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
     spy.mockRestore()
   })
 })
