@@ -1,5 +1,5 @@
 import { formatLong, isCalendarDate, type CalendarDate } from '@/domain/calendarDate'
-import type { GoogleEvent } from '@/google/calendarApi'
+import type { CalendarApi, GoogleEvent } from '@/google/calendarApi'
 
 /**
  * The discovery predicate. If `dayMarkerVersion` is ever bumped, this must match
@@ -85,4 +85,23 @@ export function groupByStartDate(events: GoogleEvent[]): Registration[] {
     })
     // Descending string comparison, which is chronological for YYYY-MM-DD.
     .sort((a, b) => (a.startDate > b.startDate ? -1 : a.startDate < b.startDate ? 1 : 0))
+}
+
+/**
+ * Fetches every page before grouping. A partial list is not an acceptable
+ * degradation here: it would show a registration count that is quietly wrong and
+ * hide registrations the user is looking for.
+ */
+export async function listRegistrations(api: CalendarApi): Promise<Registration[]> {
+  const all: GoogleEvent[] = []
+  let pageToken: string | undefined
+  do {
+    const page = await api.listEvents({
+      privateExtendedProperty: DISCOVERY_FILTER,
+      pageToken,
+    })
+    all.push(...page.items)
+    pageToken = page.nextPageToken
+  } while (pageToken)
+  return groupByStartDate(all)
 }
