@@ -1820,6 +1820,7 @@ Create `src/ui/useRegistrations.test.ts`:
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { useRegistrations, type RegistrationsDeps } from '@/ui/useRegistrations'
+import { calendarDate } from '@/domain/calendarDate'
 import type { Auth } from '@/google/auth'
 import type { CalendarApi, GoogleEvent } from '@/google/calendarApi'
 import { Unauthorized } from '@/google/errors'
@@ -1898,7 +1899,7 @@ describe('useRegistrations', () => {
     const d = deps()
     const { result } = renderHook(() => useRegistrations(d))
     await waitFor(() => expect(result.current.phase).toBe('ready'))
-    act(() => result.current.beginConfirm('2025-03-14'))
+    act(() => result.current.beginConfirm(calendarDate('2025-03-14')))
     expect(result.current.confirming).toBe('2025-03-14')
     act(() => result.current.cancelConfirm())
     expect(result.current.confirming).toBeNull()
@@ -1909,7 +1910,7 @@ describe('useRegistrations', () => {
     const d = deps()
     const { result } = renderHook(() => useRegistrations(d))
     await waitFor(() => expect(result.current.phase).toBe('ready'))
-    act(() => result.current.beginConfirm('2025-03-14'))
+    act(() => result.current.beginConfirm(calendarDate('2025-03-14')))
     await act(async () => {
       await result.current.confirmDelete()
     })
@@ -1924,7 +1925,7 @@ describe('useRegistrations', () => {
     const d = deps()
     const { result } = renderHook(() => useRegistrations(d))
     await waitFor(() => expect(result.current.phase).toBe('ready'))
-    act(() => result.current.beginConfirm('2025-03-14'))
+    act(() => result.current.beginConfirm(calendarDate('2025-03-14')))
     await act(async () => {
       await result.current.confirmDelete()
     })
