@@ -16,6 +16,7 @@ function apiReturning(byId: (id: string) => GoogleEvent | null): CalendarApi {
     insertEvent: vi.fn(async () => ({ id: 'x', status: 'confirmed' as const })),
     patchEvent: vi.fn(async () => ({ id: 'x', status: 'confirmed' as const })),
     listEvents: vi.fn(async () => ({ items: [] })),
+    deleteEvent: vi.fn(async () => 'deleted' as const),
   }
 }
 

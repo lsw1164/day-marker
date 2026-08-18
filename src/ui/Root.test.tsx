@@ -13,13 +13,13 @@ function deps(): DayMarkerDeps {
     token: vi.fn(() => null),
     clear: vi.fn(),
   }
-  // listEvents/deleteEvent arrive in Tasks 3 and 4; the cast keeps this test
-  // compiling until then and costs nothing afterwards.
-  const api = {
+  const api: CalendarApi = {
     getEvent: vi.fn(async () => null),
     insertEvent: vi.fn(),
     patchEvent: vi.fn(),
-  } as unknown as CalendarApi
+    listEvents: vi.fn(async () => ({ items: [] })),
+    deleteEvent: vi.fn(async () => 'deleted' as const),
+  }
   return { auth, api, todayDate: calendarDate('2026-06-01'), probeDelayMs: 0 }
 }
 

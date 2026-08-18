@@ -19,6 +19,7 @@ function deps(over: Partial<DayMarkerDeps> = {}): DayMarkerDeps {
     insertEvent: vi.fn(async () => ({ id: 'x', status: 'confirmed' as const })),
     patchEvent: vi.fn(async () => ({ id: 'x', status: 'confirmed' as const })),
     listEvents: vi.fn(async () => ({ items: [] })),
+    deleteEvent: vi.fn(async () => 'deleted' as const),
   }
   return { auth, api, todayDate: calendarDate('2026-06-01'), probeDelayMs: 0, ...over }
 }
