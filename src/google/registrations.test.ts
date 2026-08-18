@@ -266,6 +266,36 @@ describe('listRegistrations', () => {
     expect(out[0]?.count).toBe(2)
   })
 
+  it('dedupes an event served on two different pages', async () => {
+    // Google's page tokens are not snapshot-isolated: a calendar mutated
+    // mid-pagination can hand back the same event twice. Without dedup this
+    // would double the row's count and show two identical confirm entries.
+    const api = apiServing({
+      '': { items: [ev('a', '2025-03-14', 'd100', '2025-06-21')], nextPageToken: 'p2' },
+      p2: { items: [ev('a', '2025-03-14', 'd100', '2025-06-21')] },
+    })
+    const out = await listRegistrations(api)
+    expect(out).toHaveLength(1)
+    expect(out[0]?.count).toBe(1)
+  })
+
+  it('refuses to loop when the API repeats a page token', async () => {
+    // Deliberately not apiServing: apiServing has its own 10-call ceiling,
+    // which would mask whether *this* guard -- the production one -- is
+    // what actually stops the loop. This mock has no ceiling of its own, so
+    // without the production guard the loop genuinely never terminates.
+    const api: CalendarApi = {
+      getEvent: vi.fn(),
+      insertEvent: vi.fn(),
+      patchEvent: vi.fn(),
+      deleteEvent: vi.fn(),
+      listEvents: vi.fn(async () => ({ items: [], nextPageToken: 'loop' })),
+    }
+    await expect(listRegistrations(api)).rejects.toThrow(
+      'Calendar pagination repeated a page token; refusing to loop',
+    )
+  })
+
   it('propagates a failure rather than returning a partial list', async () => {
     // A partial list presented as complete is a lie about the user's calendar.
     const api: CalendarApi = {

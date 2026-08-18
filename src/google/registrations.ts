@@ -118,15 +118,34 @@ export function groupByStartDate(events: GoogleEvent[]): Registration[] {
  * hide registrations the user is looking for.
  */
 export async function listRegistrations(api: CalendarApi): Promise<Registration[]> {
-  const all: GoogleEvent[] = []
+  // Keyed by id rather than appended to an array: Google's page tokens are
+  // not snapshot-isolated, so a calendar mutated mid-pagination can hand the
+  // same event back on two different pages, which would otherwise double
+  // that registration's count and show two identical confirm rows.
+  const byId = new Map<string, GoogleEvent>()
+  // Production carries no page-count cap: a cap that truncates would
+  // manufacture the exact silent-lie failure this function exists to
+  // prevent, and a cap that throws would fail a real user with an
+  // implausible-but-possible registration count in exchange for defending
+  // against Google violating its own documented pagination contract. Cycle
+  // detection is different: a legitimate run never repeats a token, so this
+  // guard cannot fire on one, and it turns a token that does repeat into an
+  // immediate, labelled failure instead of a loop that never terminates.
+  const seen = new Set<string>()
   let pageToken: string | undefined
   do {
     const page = await api.listEvents({
       privateExtendedProperty: DISCOVERY_FILTER,
       pageToken,
     })
-    all.push(...page.items)
+    for (const item of page.items) byId.set(item.id, item)
     pageToken = page.nextPageToken
+    if (pageToken) {
+      if (seen.has(pageToken)) {
+        throw new Error('Calendar pagination repeated a page token; refusing to loop')
+      }
+      seen.add(pageToken)
+    }
   } while (pageToken)
-  return groupByStartDate(all)
+  return groupByStartDate([...byId.values()])
 }
