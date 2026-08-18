@@ -23,8 +23,12 @@ export interface Registration {
 
 /** `d100` → `Day 100`, `y1` → `1 Year`, `y2` → `2 Years`. */
 function labelFor(milestoneKey: string): string {
-  const n = Number(milestoneKey.slice(1))
-  if (!Number.isFinite(n)) return milestoneKey
+  const rest = milestoneKey.slice(1)
+  // Require digits rather than trusting Number(): Number('') is 0, so a bare
+  // 'd' would otherwise render as "Day 0" -- a fabricated label, worse than an
+  // honest blank, on a screen that asks the user to confirm a deletion.
+  if (!/^\d+$/.test(rest)) return milestoneKey
+  const n = Number(rest)
   if (milestoneKey.startsWith('d')) return `Day ${n}`
   if (milestoneKey.startsWith('y')) return n === 1 ? '1 Year' : `${n} Years`
   return milestoneKey
