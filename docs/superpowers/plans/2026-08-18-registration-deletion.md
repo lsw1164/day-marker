@@ -1536,7 +1536,7 @@ Mirrors `applyPlan` deliberately: same concurrency helper, same retry, same halt
 - Produces:
   - `type DeleteOutcome = 'deleted' | 'alreadyGone' | 'failed'`
   - `interface DeleteResult { event: RegistrationEvent; outcome: DeleteOutcome; error?: string }`
-  - `DELETE_CONCURRENCY = 3`, `DELETE_HALTED_MESSAGE`
+  - `DELETE_CONCURRENCY = 3`, `DELETE_HALTED`
   - `deleteRegistration(api, events, onProgress, retryDeps?, concurrency?): Promise<DeleteResult[]>`
 
 - [ ] **Step 1: Write the failing test**
@@ -1547,7 +1547,7 @@ Create `src/google/deleteRegistration.test.ts`:
 import { describe, expect, it, vi } from 'vitest'
 import {
   deleteRegistration,
-  DELETE_HALTED_MESSAGE,
+  DELETE_HALTED,
   type RegistrationEvent,
 } from '@/google/registrations'
 import type { CalendarApi } from '@/google/calendarApi'
@@ -1623,7 +1623,7 @@ describe('deleteRegistration', () => {
     const out = await deleteRegistration(apiWith(deleteEvent), evs(5), () => {}, RETRY)
     expect(out).toHaveLength(5)
     expect(out.every((r) => r.outcome === 'failed')).toBe(true)
-    expect(out.filter((r) => r.error === DELETE_HALTED_MESSAGE)).toHaveLength(2)
+    expect(out.filter((r) => r.error === DELETE_HALTED)).toHaveLength(2)
     expect(deleteEvent).toHaveBeenCalledTimes(3)
   })
 
@@ -1680,7 +1680,12 @@ export interface DeleteResult {
 
 export const DELETE_CONCURRENCY = 3
 
-export const DELETE_HALTED_MESSAGE = 'Stopped after the Google connection expired'
+/**
+ * Stamped on every event a halted run never attempted. A sentinel rather than a
+ * sentence: `ui/` maps it to copy that offers to reconnect, which is the action
+ * the user needs and which the google layer must not word.
+ */
+export const DELETE_HALTED = 'delete_halted'
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -1707,7 +1712,7 @@ export async function deleteRegistration(
       const result: DeleteResult = {
         event,
         outcome: 'failed',
-        error: DELETE_HALTED_MESSAGE,
+        error: DELETE_HALTED,
       }
       onProgress(result)
       return result
@@ -1736,7 +1741,7 @@ export async function deleteRegistration(
 }
 ```
 
-The rejection scan mirrors `plan.ts` rather than `apply.ts`'s bare cast: the per-item callback should never reject, but a throwing `onProgress` would, and casting a rejected slot would put `undefined` into React state.
+The rejection scan mirrors the map-with-throw form `apply.ts` and `plan.ts` both already use: the per-item callback should never reject, but a throwing `onProgress` would, and casting a rejected slot would put `undefined` into React state.
 
 - [ ] **Step 4: Run it to verify it passes**
 
@@ -1791,6 +1796,12 @@ In `src/ui/copy.ts`, inside `COPY`:
   // Google handed back a page token it had already served. Rare, and not the
   // user's doing, so say what to do rather than what went wrong.
   paginationLooped: 'Your calendar list did not load correctly. Please try again.',
+  // Shown when a delete run stopped early because the token died. Says what to do,
+  // and deliberately does not claim the remaining events are still there -- a
+  // failed DELETE deletes nothing, but a lost response is indistinguishable from
+  // one that landed, so the copy must not promise either way.
+  deleteHalted:
+    'Your Google connection expired before every event was deleted. Reconnect, then delete again.',
   deleteSummary: (deleted: number, alreadyGone: number, failed: number) =>
     [
       `${deleted} deleted`,
@@ -2133,7 +2144,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { RegistrationRow, type RegistrationRowProps } from '@/ui/RegistrationRow'
-import type { Registration } from '@/google/registrations'
+import { DELETE_HALTED, type Registration } from '@/google/registrations'
 import { calendarDate } from '@/domain/calendarDate'
 import { COPY } from '@/ui/copy'
 
@@ -2257,6 +2268,21 @@ describe('RegistrationRow — deleting and done', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('boom')
   })
 
+  it('offers to reconnect when the run halted, rather than showing the raw 401', () => {
+    // The first failure is always the real 401, because mapWithLimit claims
+    // indices in increasing order -- so selecting on `outcome === 'failed'` would
+    // render "Google Calendar API 401 (authError)" and never the actionable copy.
+    renderRow({
+      state: 'done',
+      results: [
+        { event: REG.events[0]!, outcome: 'failed', error: 'Google Calendar API 401 (authError)' },
+        { event: REG.events[1]!, outcome: 'failed', error: DELETE_HALTED },
+        { event: REG.events[2]!, outcome: 'failed', error: DELETE_HALTED },
+      ],
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent(COPY.deleteHalted)
+  })
+
   it('says nothing extra when every event succeeded', () => {
     renderRow({
       state: 'done',
@@ -2296,7 +2322,11 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { formatLong, type CalendarDate } from '@/domain/calendarDate'
-import type { DeleteResult, Registration } from '@/google/registrations'
+import {
+  DELETE_HALTED,
+  type DeleteResult,
+  type Registration,
+} from '@/google/registrations'
 import { cn } from '@/lib/utils'
 import { COPY } from '@/ui/copy'
 
@@ -2330,7 +2360,15 @@ export function RegistrationRow({
   const deleted = results.filter((r) => r.outcome === 'deleted').length
   const alreadyGone = results.filter((r) => r.outcome === 'alreadyGone').length
   const failed = results.filter((r) => r.outcome === 'failed').length
-  const firstFailure = results.find((r) => r.outcome === 'failed')?.error
+  // A halted run stamps DELETE_HALTED on every event it never attempted. Prefer
+  // that over the first failure's error, because the first failure is ALWAYS the
+  // real 401: mapWithLimit's workers claim indices in increasing order, so the
+  // item that set the halt flag always sorts before the items it short-circuited.
+  // Reading `find(outcome === 'failed')?.error` would therefore render
+  // "Google Calendar API 401 (authError)" and never the reconnect message.
+  const reason = results.some((r) => r.error === DELETE_HALTED)
+    ? COPY.deleteHalted
+    : results.find((r) => r.outcome === 'failed')?.error
 
   return (
     <li
@@ -2400,13 +2438,14 @@ export function RegistrationRow({
                 halted by an expired token shows `Failed` badges and a bare count,
                 with nothing saying the events were never attempted or that
                 reconnecting is what fixes it — deleteRegistration stamps those
-                items with DELETE_HALTED_MESSAGE precisely so it can be read.
+                items with the DELETE_HALTED sentinel precisely so ui/ can
+                recognise the case and supply the wording.
                 Cannot collide with the confirming Alert above: that one is gated
                 on `state === 'confirming'`, which this branch excludes.
               */}
-              {firstFailure && (
+              {reason && (
                 <Alert variant="destructive" className="mt-3">
-                  <AlertDescription>{firstFailure}</AlertDescription>
+                  <AlertDescription>{reason}</AlertDescription>
                 </Alert>
               )}
             </>
