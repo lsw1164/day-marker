@@ -1623,12 +1623,13 @@ describe('deleteRegistration', () => {
     const out = await deleteRegistration(apiWith(deleteEvent), evs(5), () => {}, RETRY)
     expect(out).toHaveLength(5)
     expect(out.every((r) => r.outcome === 'failed')).toBe(true)
-    // Three, not two: the two never attempted PLUS the one that 401'd. At
-    // concurrency 3 a run of 3 or fewer events has nothing queued behind the
-    // failure, so stamping only the skipped items would leave a genuine halt
-    // with no DELETE_HALTED anywhere and the UI's reconnect path would never
-    // fire. See the ledger's F39.
-    expect(out.filter((r) => r.error === DELETE_HALTED)).toHaveLength(3)
+    // All five, not two. The three concurrent workers each hit the dead token
+    // before any could observe another's failure, so all three get real 401s --
+    // now stamped DELETE_HALTED -- on top of the two never attempted. Stamping
+    // only the skipped items would leave a run of 3 or fewer events (nothing
+    // queued at concurrency 3) reporting a halt with no DELETE_HALTED anywhere,
+    // and the UI's reconnect path would never fire. See the ledger's F39.
+    expect(out.filter((r) => r.error === DELETE_HALTED)).toHaveLength(5)
     expect(deleteEvent).toHaveBeenCalledTimes(3)
   })
 
