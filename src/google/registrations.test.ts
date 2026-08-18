@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
-import { groupByStartDate } from '@/google/registrations'
-import type { GoogleEvent } from '@/google/calendarApi'
+import { describe, expect, it, vi } from 'vitest'
+import { groupByStartDate, listRegistrations, DISCOVERY_FILTER } from '@/google/registrations'
+import type { CalendarApi, EventListPage, GoogleEvent } from '@/google/calendarApi'
+import { Unauthorized } from '@/google/errors'
 
 function ev(
   id: string,
@@ -128,5 +129,73 @@ describe('groupByStartDate', () => {
 
   it('returns nothing for an empty list', () => {
     expect(groupByStartDate([])).toEqual([])
+  })
+})
+
+function apiReturning(pages: EventListPage[]): CalendarApi {
+  let call = 0
+  return {
+    getEvent: vi.fn(),
+    insertEvent: vi.fn(),
+    patchEvent: vi.fn(),
+    deleteEvent: vi.fn(),
+    listEvents: vi.fn(async () => pages[call++] ?? { items: [] }),
+  } as unknown as CalendarApi
+}
+
+describe('listRegistrations', () => {
+  it('queries with the discovery filter', async () => {
+    const api = apiReturning([{ items: [] }])
+    await listRegistrations(api)
+    expect(api.listEvents).toHaveBeenCalledWith({
+      privateExtendedProperty: DISCOVERY_FILTER,
+      pageToken: undefined,
+    })
+  })
+
+  it('follows nextPageToken and merges every page', async () => {
+    // The whole point: a registration that exists on page two must be findable.
+    // Showing only page one would be worse than having no list at all.
+    const api = apiReturning([
+      { items: [ev('a', '2025-03-14', 'd100', '2025-06-21')], nextPageToken: 'p2' },
+      { items: [ev('b', '2026-01-01', 'd100', '2026-04-10')] },
+    ])
+    const out = await listRegistrations(api)
+    expect(api.listEvents).toHaveBeenCalledTimes(2)
+    expect((api.listEvents as ReturnType<typeof vi.fn>).mock.calls[1]![0]).toEqual({
+      privateExtendedProperty: DISCOVERY_FILTER,
+      pageToken: 'p2',
+    })
+    expect(out.map((r) => r.startDate)).toEqual(['2026-01-01', '2025-03-14'])
+  })
+
+  it('stops after one page when there is no token', async () => {
+    const api = apiReturning([{ items: [] }])
+    await listRegistrations(api)
+    expect(api.listEvents).toHaveBeenCalledTimes(1)
+  })
+
+  it('merges pages that belong to the same registration', async () => {
+    const api = apiReturning([
+      { items: [ev('a', '2025-03-14', 'd100', '2025-06-21')], nextPageToken: 'p2' },
+      { items: [ev('b', '2025-03-14', 'y1', '2026-03-14')] },
+    ])
+    const out = await listRegistrations(api)
+    expect(out).toHaveLength(1)
+    expect(out[0]?.count).toBe(2)
+  })
+
+  it('propagates a failure rather than returning a partial list', async () => {
+    // A partial list presented as complete is a lie about the user's calendar.
+    const api = {
+      getEvent: vi.fn(),
+      insertEvent: vi.fn(),
+      patchEvent: vi.fn(),
+      deleteEvent: vi.fn(),
+      listEvents: vi.fn(async () => {
+        throw new Unauthorized(401, 'authError', '')
+      }),
+    } as unknown as CalendarApi
+    await expect(listRegistrations(api)).rejects.toBeInstanceOf(Unauthorized)
   })
 })
