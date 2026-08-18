@@ -146,8 +146,14 @@ byte-identical is worth more than tidiness.
 
 `listEvents` issues `GET /calendars/primary/events` with
 `privateExtendedProperty=dayMarkerVersion%3D1`, following `nextPageToken` until
-exhausted. `showDeleted` is left at its default of `false`, so already-cancelled
-events are excluded — which is what we want.
+exhausted. `showDeleted` is left at its default of `false`, so cancelled
+events are excluded — with one documented exception. Google's `events.list`
+reference states that cancelled *instances* of recurring events are still returned
+when `showDeleted` and `singleEvents` are both false, which is exactly our
+configuration. `singleEvents` stays false deliberately (see `calendarApi.ts`: at
+`true` we would get one row per occurrence and deleting an instance id would cancel
+one occurrence instead of the registration), so grouping drops `status: 'cancelled'`
+events itself rather than relying on the query to have excluded them.
 
 **Pagination is not optional.** Several years of registrations will exceed one page,
 and silently showing the first page would mean a registration that exists but cannot
@@ -163,9 +169,11 @@ derives:
 | `count` | number of events in the group |
 | `events` | id, milestone label (from `milestoneKey`), and date, sorted by date |
 
-No label field is stamped. Showing the first event's summary displays
+No label field is stamped. Showing the earliest-dated event's summary displays
 `Anna & Ben: Day 100` when a label exists and `Day 100` when it does not, which is
-enough to recognise a registration and requires no migration.
+enough to recognise a registration and requires no migration. A summary that is
+empty or whitespace falls back to the formatted start date: on a screen whose job is
+to say what is about to be lost, a blank row identifies nothing.
 
 Registrations are sorted by `startDate` **descending** as a string comparison, which
 is chronological for `YYYY-MM-DD`. "Newest first" is deliberately avoided as wording:
@@ -288,9 +296,11 @@ It belongs in the plan's Global Constraints and should be enforced at review.
 
 **Unit:**
 
-- `groupByStartDate` — table-driven: multiple registrations, single-event groups,
-  events missing `startDate` (ignored), ordering newest first, title derivation with
-  and without a label.
+- `groupByStartDate` — multiple registrations, single-event groups, events missing
+  `startDate` (ignored), events the user switched from all-day to timed (kept, dated
+  from `start.dateTime`), cancelled events (dropped), ordering newest first, and
+  title derivation with a label, without one, and with a blank one. Fixtures must not
+  arrive already in the expected order, or a sort assertion proves nothing.
 - Pagination — mocked `fetch` returning two pages, asserting both are merged and the
   token is followed; and that a single page with no token does not loop.
 - `deleteEvent` — `404` and `410` both map to `alreadyGone`; other statuses keep the
