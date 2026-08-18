@@ -207,8 +207,13 @@ on the write path.
 `applyPlan`: `mapWithLimit` at concurrency 3, each delete wrapped in `withRetry`
 gated by the existing `isRetryable`, per-item results reported live through
 `onProgress`, and a `401` setting a halt flag so the remaining deletes are marked
-failed rather than fired at a dead token. Results already collected are preserved,
-so a failed run can be retried for only its failures.
+failed rather than fired at a dead token. Results already collected are preserved.
+
+Unlike the write path, deletion offers **no retry-only-the-failures affordance**, and
+deliberately so: re-deleting an event that is already gone returns `alreadyGone`, which
+is a success, so re-running an entire registration is idempotent and safe. The user
+goes back to the list and deletes again; a partial-retry control would add a second
+path to the same outcome and a second thing to get wrong on the one flow with no undo.
 
 Outcomes: `deleted | alreadyGone | failed`.
 
@@ -311,9 +316,11 @@ It belongs in the plan's Global Constraints and should be enforced at review.
   token is followed; and that a single page with no token does not loop.
 - `deleteEvent` — `404` and `410` both map to `alreadyGone`; other statuses keep the
   existing mapping.
-- `deleteRegistration` — a mixed run producing `deleted`/`alreadyGone`/`failed`; a
-  `401` halting the remainder while preserving earlier results; retry covering only
-  failures.
+- `deleteRegistration` — a mixed run producing `deleted`/`alreadyGone`/`failed`, with
+  completion order differing from input order so that matching by array position is
+  caught; a `401` halting the remainder while preserving earlier results; and the
+  retry wrapper landing on `alreadyGone` after a rate limit, which is a success rather
+  than a failure.
 - `useRegistrations` — phase transitions, and that cancelling a confirm returns to
   the list without deleting.
 - `useTheme` — a stored preference wins over the OS; a change persists; clearing it
