@@ -95,7 +95,17 @@ export function RegistrationRow({
             without a mouse -- there are no interactive children to trap
             focus behind, so this cannot create a focus trap.
           */}
-          <ul tabIndex={0} className="mt-3 max-h-56 overflow-y-auto border-t pt-2 text-sm">
+          {/*
+            Capped and taller at lg. The card spans both grid columns so a long
+            open row does not leave a void beside a short neighbour -- but this
+            list scrolls, so the width buys nothing except distance between each
+            date and its badge. The gain goes on height instead: more of what is
+            about to be deleted visible at once, which is the whole point here.
+          */}
+          <ul
+            tabIndex={0}
+            className="mt-3 max-h-56 overflow-y-auto border-t pt-2 text-sm lg:max-h-80 lg:max-w-2xl"
+          >
             {registration.events.map((event) => {
               const result = byId.get(event.id)
               const past = event.date < todayDate

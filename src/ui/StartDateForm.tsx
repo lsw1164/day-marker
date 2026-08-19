@@ -56,7 +56,14 @@ export function StartDateForm({
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      {/*
+        Two-up across the full-width mobile form, stacked in the desktop rail.
+        Side by side at lg the pair would each get about 146px, and the longest
+        reminder option ("3 days before, 9:00 AM") needs nearer 180px, so the
+        native select crops its own labels. The rail has vertical room to spare,
+        so the layout gives way rather than the copy.
+      */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-1">
         <div className="space-y-1.5">
           <Label htmlFor="years">{COPY.range}</Label>
           <select
