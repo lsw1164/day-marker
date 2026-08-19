@@ -318,3 +318,49 @@ describe('RegistrationsPage', () => {
     expect(screen.queryByText(COPY.registrationsCount(2))).not.toBeInTheDocument()
   })
 })
+
+describe('RegistrationsPage — signing out', () => {
+  it('offers a sign-out once connected, and returns to the connect prompt', async () => {
+    render(<RegistrationsPage deps={deps(TWO)} checkGisReady={ready} todayDate={TODAY} />)
+    await rowFor(TITLE_A)
+    expect(screen.getByText(COPY.connected)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: COPY.signOut }))
+
+    expect(screen.getByText(COPY.notConnected)).toBeInTheDocument()
+    expect(screen.getByText(COPY.registrationsConnectPrompt)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: COPY.connect })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: COPY.signOut })).not.toBeInTheDocument()
+    // The departed account's registrations are gone from the page, not merely
+    // hidden behind the connect prompt.
+    expect(screen.queryByText(TITLE_A)).not.toBeInTheDocument()
+  })
+
+  it('is not offered while a delete is in flight', async () => {
+    // Clearing the token mid-run halts the delete and fails every event still
+    // queued -- the involuntary version of which is what COPY.deleteHalted
+    // exists to explain. There is no reason to offer the voluntary one here.
+    const d = deps(REG_A)
+    let arrive = () => {}
+    const latch = new Promise<void>((resolve) => {
+      arrive = () => resolve()
+    })
+    ;(d.api.deleteEvent as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      await latch
+      return 'deleted' as const
+    })
+    render(<RegistrationsPage deps={d} checkGisReady={ready} todayDate={TODAY} />)
+    const row = await rowFor(TITLE_A)
+    await userEvent.click(within(row).getByRole('button', { name: COPY.deleteOpen }))
+    await userEvent.click(screen.getByRole('button', { name: COPY.deleteConfirm(1) }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: COPY.signOut })).not.toBeInTheDocument(),
+    )
+
+    arrive()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: COPY.deleteBack })).toBeInTheDocument(),
+    )
+  })
+})

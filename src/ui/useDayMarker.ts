@@ -59,7 +59,16 @@ export function useDayMarker({
   const [years, setYears] = useState(DEFAULT_YEARS)
   const [reminder, setReminder] = useState<ReminderPreset>(DEFAULT_REMINDER)
 
-  const [connected, setConnected] = useState(false)
+  /**
+   * Derived from the token, not assumed false. A `<Route element>` unmounts on
+   * navigation, so this hook's state does not survive a tab switch — but the
+   * token does, because it lives in the `auth` singleton above both pages. This
+   * is the same rule `useRegistrations` states: the token is the single source
+   * of truth, so arriving from the other route with a live session must not read
+   * as "Not connected" — beside a Connect button that re-opens Google's popup
+   * for a grant the user already gave.
+   */
+  const [connected, setConnected] = useState(() => auth.token() !== null)
   const [phase, setPhase] = useState<Phase>('idle')
   const [plan, setPlan] = useState<PlanItem[]>([])
   const [results, setResults] = useState<ItemResult[]>([])
@@ -114,6 +123,15 @@ export function useDayMarker({
    */
   const [reprobePending, setReprobePending] = useState(false)
 
+  /**
+   * The prompt an argument-less `connect()` should use. '' re-authorizes
+   * silently, which is right for a first connect and for a dead token — but
+   * wrong immediately after a sign-out: the grant outlives the token, so ''
+   * would hand back the very account the user just left, with no way to reach a
+   * second one. A ref, not state, because nothing renders differently for it.
+   */
+  const nextPrompt = useRef<GisPrompt>('')
+
   // Guards against a slow probe overwriting a newer one.
   const probeToken = useRef(0)
   // Bumped to force a re-probe when the inputs have not changed but the calendar
@@ -136,6 +154,12 @@ export function useDayMarker({
       setPhase('probing')
       void (async () => {
         try {
+          // Resolved here as well as in `connect`, because `connected` can be
+          // seeded from a token this hook never asked for — the user connected
+          // on /registrations and navigated. Without it the very first probe of
+          // that session queries `/calendars//events`. Cached after the first
+          // call, so every later probe costs nothing.
+          await calendarRef.current.ensure()
           const next = await buildPlan(apiRef.current, milestones, options, todayDate)
           if (probeToken.current !== ticket) return
           setPlan(next)
@@ -170,19 +194,26 @@ export function useDayMarker({
    * closure and would be stale.
    */
   const connect = useCallback(
-    async (prompt: GisPrompt = ''): Promise<boolean> => {
+    async (prompt?: GisPrompt): Promise<boolean> => {
+      // An explicit argument always wins; `undefined` means "whatever the last
+      // sign-out left pending", which is how the chooser reaches the button in
+      // App.tsx without that button knowing anything about sign-out.
+      const chosen = prompt ?? nextPrompt.current
       try {
         // Called before any await so the popup survives the user gesture. It stays
         // inside the try and is always awaited, so a handler is attached — clear()
         // rejects a pending call rather than dropping it, and a fire-and-forget
         // call here would surface as an unhandled rejection.
-        const promise = authRef.current.connect(prompt)
+        const promise = authRef.current.connect(chosen)
         await promise
         // Before `connected` flips, because that flag is what releases the
         // probe effect — and a probe without a calendar ID would request
         // `/calendars//events`. Cached after the first success, so a reconnect
         // costs nothing.
         await calendarRef.current.ensure()
+        // Spent, and only once the connection it was meant for actually landed:
+        // a closed popup means the user never saw the chooser they asked for.
+        nextPrompt.current = ''
         setError(null)
         setConnected(true)
         return true
@@ -273,6 +304,32 @@ export function useDayMarker({
     )
   }, [results, connect, run])
 
+  /**
+   * The deliberate counterpart of the failed-probe path above: the same three
+   * effects on the session — forget the token, forget the calendar, drop
+   * `connected` — reached on purpose instead of by a 401.
+   *
+   * The inputs are deliberately left alone. Signing out says nothing about the
+   * date the user typed, and clearing it would make "sign out" cost them the
+   * form. The plan does go, because it is a statement about a calendar this
+   * session can no longer read.
+   */
+  const signOut = useCallback(() => {
+    // Retires any probe still in flight. Its request went out while the session
+    // was live, so its reply is well-formed and would set `plan`/'ready' on
+    // arrival — putting the preview back up beside a Connect button.
+    probeToken.current += 1
+    nextPrompt.current = 'select_account'
+    setConnected(false)
+    setPlan([])
+    setResults([])
+    setError(null)
+    setPhase('idle')
+    setReprobePending(false)
+    authRef.current.clear()
+    calendarRef.current.forget()
+  }, [])
+
   const reset = useCallback(() => {
     setResults([])
     setPhase(connected ? 'probing' : 'idle')
@@ -306,6 +363,7 @@ export function useDayMarker({
     setReminder,
     toggle,
     connect,
+    signOut,
     submit,
     retryFailed,
     reset,

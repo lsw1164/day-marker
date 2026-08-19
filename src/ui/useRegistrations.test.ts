@@ -682,3 +682,111 @@ describe('useRegistrations — the app calendar', () => {
     expect(calendar.forget).toHaveBeenCalled()
   })
 })
+
+/**
+ * The deliberate counterpart of the halted-run disconnect: same three effects on
+ * the session, reached on purpose. It shares `disconnectAfterHalt`'s body for
+ * exactly that reason.
+ */
+describe('useRegistrations — signing out', () => {
+  it('drops the connection and the list', async () => {
+    const d = deps()
+    ;(d.auth.token as ReturnType<typeof vi.fn>).mockReturnValue('tok')
+    const { result } = renderHook(() => useRegistrations(d))
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+    expect(result.current.registrations).toHaveLength(1)
+
+    act(() => result.current.signOut())
+
+    expect(result.current.connected).toBe(false)
+    expect(d.auth.clear).toHaveBeenCalled()
+    // The next connect may be another account, whose calendar is not this one.
+    expect(d.calendar.forget).toHaveBeenCalled()
+    // Not merely hidden by the !connected branch: a list read with the old
+    // token must not be sitting in state when a different account connects.
+    expect(result.current.registrations).toEqual([])
+    expect(result.current.confirming).toBeNull()
+    expect(result.current.results).toEqual([])
+    expect(result.current.phase).toBe('idle')
+    expect(result.current.error).toBeNull()
+  })
+
+  it('cannot be undone by a list load that was already in flight', async () => {
+    const d = deps()
+    ;(d.auth.token as ReturnType<typeof vi.fn>).mockReturnValue('tok')
+    let arrive = () => {}
+    const latch = new Promise<void>((resolve) => {
+      arrive = () => resolve()
+    })
+    ;(d.api.listEvents as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      await latch
+      return { items: [ev('a', '2025-03-14', 'd100', '2025-06-21')] }
+    })
+    const { result } = renderHook(() => useRegistrations(d))
+    await waitFor(() => expect(result.current.phase).toBe('loading'))
+
+    act(() => result.current.signOut())
+    await act(async () => {
+      arrive()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    // The request went out while the session was live, so its reply is
+    // well-formed and would land as a list -- one read with the departed
+    // account's token, sitting on screen for whoever connects next.
+    expect(result.current.registrations).toEqual([])
+    expect(result.current.phase).toBe('idle')
+    expect(result.current.connected).toBe(false)
+  })
+
+  it('asks for the account chooser on the next connect', async () => {
+    const d = deps()
+    ;(d.auth.token as ReturnType<typeof vi.fn>).mockReturnValue(null)
+    const { result } = renderHook(() => useRegistrations(d))
+    await act(async () => {
+      await result.current.connect()
+    })
+    expect(d.auth.connect).toHaveBeenLastCalledWith('')
+
+    act(() => result.current.signOut())
+    await act(async () => {
+      await result.current.connect()
+    })
+
+    expect(d.auth.connect).toHaveBeenLastCalledWith('select_account')
+  })
+
+  it('does not sign out from under a delete in flight', async () => {
+    // The same hazard the deletingRef guard closes for beginConfirm,
+    // cancelConfirm and backToList, reached through one more door -- and the
+    // worst version of it: clearing the token mid-run fails every event still
+    // queued, so a deletion the user cannot undo would report as a pile of
+    // errors they did not cause.
+    const d = deps()
+    const resolvers: ((v: 'deleted') => void)[] = []
+    ;(d.api.deleteEvent as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise((resolve) => resolvers.push(resolve)),
+    )
+    const { result } = renderHook(() => useRegistrations(d))
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+    act(() => result.current.beginConfirm(calendarDate('2025-03-14')))
+
+    let finished!: Promise<void>
+    act(() => {
+      finished = result.current.confirmDelete()
+    })
+    await waitFor(() => expect(result.current.phase).toBe('deleting'))
+
+    act(() => result.current.signOut())
+
+    expect(result.current.connected).toBe(true)
+    expect(d.auth.clear).not.toHaveBeenCalled()
+    expect(result.current.phase).toBe('deleting')
+
+    act(() => resolvers.forEach((r) => r('deleted')))
+    await act(async () => {
+      await finished
+    })
+    expect(result.current.phase).toBe('done')
+  })
+})

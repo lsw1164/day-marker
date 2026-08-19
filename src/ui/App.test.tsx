@@ -8,15 +8,20 @@ import type { AppCalendar } from '@/google/appCalendar'
 import type { CalendarApi } from '@/google/calendarApi'
 import type { GoogleEventPayload } from '@/domain/eventPayload'
 import { calendarDate } from '@/domain/calendarDate'
+import { COPY } from '@/ui/copy'
 
 function stubCalendar(): AppCalendar {
   return { ensure: vi.fn(async () => 'cal-1'), id: vi.fn(() => 'cal-1'), forget: vi.fn() }
 }
 
 function deps(over: Partial<DayMarkerDeps> = {}): DayMarkerDeps {
+  // `token: () => null` is a cold load: nothing granted yet. That is the
+  // precondition of every assertion below that expects a Connect button, and
+  // the hook now derives `connected` from this — a stub answering with a token
+  // would render the page connected before the test ever clicks anything.
   const auth: Auth = {
     connect: vi.fn(async () => 'tok'),
-    token: vi.fn(() => 'tok'),
+    token: vi.fn(() => null),
     clear: vi.fn(),
   }
   const api: CalendarApi = {
@@ -118,6 +123,51 @@ describe('App — connected', () => {
     await waitFor(() => expect(screen.getByText('12 milestones')).toBeInTheDocument())
     expect(d.api.insertEvent).toHaveBeenCalledTimes(12)
     expect(screen.getByText('added to your calendar')).toBeInTheDocument()
+  })
+})
+
+describe('App — signing out', () => {
+  it('offers a sign-out once connected, and returns to the connect prompt', async () => {
+    await renderReady()
+    enterStartDate('2026-01-01')
+    await userEvent.click(screen.getByRole('button', { name: /Connect Google account/ }))
+    expect(await screen.findByRole('button', { name: 'Add 12' })).toBeInTheDocument()
+    expect(screen.getByText(COPY.connected)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: COPY.signOut }))
+
+    expect(screen.getByText(COPY.notConnected)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Connect Google account/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: COPY.signOut })).not.toBeInTheDocument()
+    // The date the user typed is not the connection's to take, so the milestone
+    // list stays exactly as it reads before anyone connects at all.
+    expect(screen.getByText('Day 100')).toBeInTheDocument()
+    expect(screen.getByText('13 milestones')).toBeInTheDocument()
+  })
+
+  it('is not offered while a write is in flight', async () => {
+    // Pulling the token mid-write fails every remaining event, and the user
+    // reads a report full of errors they did not cause.
+    const d = deps()
+    let arrive = () => {}
+    const latch = new Promise<void>((resolve) => {
+      arrive = () => resolve()
+    })
+    ;(d.api.insertEvent as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      await latch
+      return { id: 'x', status: 'confirmed' as const }
+    })
+    await renderReady(d)
+    enterStartDate('2026-01-01')
+    await userEvent.click(screen.getByRole('button', { name: /Connect Google account/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Add 12' }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: COPY.signOut })).not.toBeInTheDocument(),
+    )
+
+    arrive()
+    await waitFor(() => expect(screen.getByText('12 milestones')).toBeInTheDocument())
   })
 })
 

@@ -4,10 +4,10 @@ The unit suite mocks `fetch`, so checks 1–5 can only be confirmed against a re
 Google Calendar. Run them after any change to `src/domain/eventPayload.ts`,
 `src/google/apply.ts`, or `src/google/plan.ts`.
 
-Checks 6–13 cover things a mocked, jsdom-based suite cannot see at all: a
+Checks 6–14 cover things a mocked, jsdom-based suite cannot see at all: a
 pre-paint script, native browser chrome, a real deployed host, a real Google
 popup, and — since 2026-08-19 — whether the app's own calendar and its Drive
-pointer actually agree across accounts and devices. Run the full thirteen before
+pointer actually agree across accounts and devices. Run the full fourteen before
 any deploy.
 
 Checks 11–13 are the ones that matter most after the scope change. They are the
@@ -202,6 +202,34 @@ The affordance this scope change exists to give the user.
 - **If it reports an error instead:** record the exact message. A 404 surfacing
   to the user means `calendars.get` did not run before the events did.
 
+## 14. Signing out reaches a second account
+
+Sign-out clears the token and the cached calendar ID, and asks Google for the
+account chooser (`prompt: 'select_account'`) on the next connect. Unit tests pin
+the argument handed to the auth layer; only a real popup shows whether Google
+actually offers the chooser, and only a second account proves the app does not
+carry the first one's calendar across.
+
+- Connect, register a start date, then click **Sign out**. **Expect:** the chip
+  reads `Not connected` and the Connect button returns. Your registrations
+  disappear from the Registrations tab.
+- Click **Connect** again. **Expect:** Google's *account chooser* opens — not a
+  silent re-authorization straight back into the same account. Pick a
+  **different** Google account.
+- Register a start date, then open Google Calendar for that second account.
+- **Expect:** a **Day Marker** calendar belonging to the second account, holding
+  only what you registered just now. The Registrations tab lists only that, and
+  the first account's registrations are nowhere in it.
+- **If the chooser never appears:** record whether the popup opened at all. No
+  popup is check 9's failure, not this one; a popup that silently returns the
+  first account means the prompt is not reaching GIS.
+- **If the second account sees the first account's registrations, or no second
+  calendar is created:** record both accounts' calendar lists and whether Drive →
+  Settings → *Manage apps* shows Day Marker data under each. This is
+  `calendar.forget()` failing to drop the departed account's cached ID, which
+  writes one user's milestones into a calendar the other cannot see — the one
+  cross-account version of the duplicate-calendar failure in check 11.
+
 ## Log
 
 No runs recorded yet. Append one line per run in this format, keeping failed
@@ -218,5 +246,6 @@ YYYY-MM-DD — <name> — 1: <pass|fail> — 2: <pass|fail> — 3: <pass|fail> �
 11: <pass|fail, and how many calendars if it failed> —
 12: <pass|fail, and whether Drive consent was asked if it failed> —
 13: <pass|fail, and the exact error if it failed> —
+14: <pass|fail, and whether the chooser appeared if it failed> —
 notes: <anything from a "record" bullet above, or "none">
 ```

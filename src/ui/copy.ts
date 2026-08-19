@@ -61,6 +61,7 @@ export const COPY = {
   notConnected: 'Not connected',
   connected: 'Connected',
   connect: 'Connect Google account',
+  signOut: 'Sign out',
 
   startDate: 'Start date',
   labelField: 'Label — optional',

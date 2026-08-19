@@ -68,10 +68,31 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
     <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-5 px-4 pb-28 pt-5">
       {/* Identity and nav moved to the shared Header. The connection chip stays
           here because connecting is page-level. */}
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-1">
         <span className="text-xs text-muted-foreground">
           {state.connected ? COPY.connected : COPY.notConnected}
         </span>
+        {/*
+          Beside the chip rather than in the shared Header: `connected` is state
+          inside this page's hook, with no subscription to the auth singleton, so
+          a Header control could clear the token without either page hearing
+          about it. Both routes carry their own, and only one is ever mounted.
+
+          Hidden — not disabled — during a write: clearing the token mid-run
+          fails every event still queued, so the user would read a report full of
+          errors they did not cause. A disabled button would still advertise an
+          action that is wrong at that moment.
+        */}
+        {state.connected && state.phase !== 'applying' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs text-muted-foreground"
+            onClick={state.signOut}
+          >
+            {COPY.signOut}
+          </Button>
+        )}
       </div>
 
       {/*

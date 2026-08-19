@@ -185,9 +185,32 @@ export function RegistrationsPage({
             ? COPY.registrationsCount(state.registrations.length)
             : COPY.registrationsTitle}
         </h2>
-        <span className="shrink-0 text-xs text-muted-foreground">
-          {state.connected ? COPY.connected : COPY.notConnected}
-        </span>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="text-xs text-muted-foreground">
+            {state.connected ? COPY.connected : COPY.notConnected}
+          </span>
+          {/*
+            Beside the chip rather than in the shared Header, for the same reason
+            App.tsx keeps its own: `connected` is state inside this page's hook,
+            with no subscription to the auth singleton.
+
+            Hidden while a delete runs, alongside the deletingRef guard in the
+            hook. Clearing the token mid-run halts the delete and fails every
+            event still queued -- the involuntary version of which is what
+            COPY.deleteHalted exists to explain. The guard makes a click during
+            the window before this re-renders a no-op rather than a lie.
+          */}
+          {state.connected && state.phase !== 'deleting' && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs text-muted-foreground"
+              onClick={state.signOut}
+            >
+              {COPY.signOut}
+            </Button>
+          )}
+        </div>
       </div>
 
       {showPageError && (

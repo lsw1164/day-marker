@@ -12,12 +12,44 @@ import type { RetryDeps } from '@/lib/backoff'
 const TODAY = calendarDate('2026-06-01')
 const RETRY: RetryDeps = { attempts: 1, baseMs: 1, sleep: async () => {}, random: () => 0.5 }
 
+/**
+ * `token: () => null` is the honest default: it means "cold load, nothing
+ * granted yet", which is the precondition of every disconnected assertion
+ * below. A stub that always answered with a token would make those assertions
+ * unfalsifiable now that the hook derives `connected` from it -- so a test that
+ * wants a live session states so, and says which one.
+ */
 function stubAuth(overrides: Partial<Auth> = {}): Auth {
   return {
     connect: vi.fn(async () => 'tok'),
-    token: vi.fn(() => 'tok'),
+    token: vi.fn(() => null),
     clear: vi.fn(),
     ...overrides,
+  }
+}
+
+/** A session that outlived the component that opened it -- see Root.test.tsx. */
+function liveAuth(): Auth {
+  return stubAuth({ token: vi.fn(() => 'tok') })
+}
+
+/**
+ * A behavioural fake: `token()` answers from the slot `connect()` fills and
+ * `clear()` empties, as the real closure in `google/auth.ts` does. Signing out
+ * cannot be observed against a stub whose `token()` is a constant -- the whole
+ * point of it is that the token stops being there.
+ */
+function sessionAuth(): Auth {
+  let live: string | null = null
+  return {
+    connect: vi.fn(async () => {
+      live = 'tok'
+      return live
+    }),
+    token: vi.fn(() => live),
+    clear: vi.fn(() => {
+      live = null
+    }),
   }
 }
 
@@ -312,6 +344,44 @@ describe('useDayMarker — the app calendar', () => {
     expect(api.getEvent).not.toHaveBeenCalled()
   })
 
+  it('reads a live token as already connected', async () => {
+    // The route change that loses this hook's state cannot lose the token: it
+    // lives in the auth singleton, one level up. Assuming `false` here is what
+    // put "Not connected" beside a live session after a tab switch.
+    const { result } = renderHook(() => useDayMarker(deps({ auth: liveAuth() })))
+
+    expect(result.current.connected).toBe(true)
+  })
+
+  it('resolves the calendar before probing with a token it never requested', async () => {
+    // Mirrors main.tsx, where `api` reads the ID lazily: an unresolved ID is not
+    // an inert empty string, it is a request to `/calendars//events`. Arriving
+    // with a seeded token means `connect()` -- the only other place `ensure()`
+    // runs -- was never called on this hook.
+    let id = ''
+    const calendar = stubCalendar({
+      ensure: vi.fn(async () => {
+        id = 'cal-1'
+        return id
+      }),
+      id: vi.fn(() => id),
+    })
+    const api = stubApi()
+    ;(api.getEvent as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      if (calendar.id() === '') throw new Error('probed with no calendar')
+      return null
+    })
+    const { result } = renderHook(() =>
+      useDayMarker(deps({ auth: liveAuth(), api, calendar })),
+    )
+
+    act(() => result.current.setStartDate('2026-01-01'))
+
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+    expect(result.current.error).toBeNull()
+    expect(result.current.plan).toHaveLength(13)
+  })
+
   it('is forgotten when a failed probe drops the connection', async () => {
     const calendar = stubCalendar()
     const api = stubApi()
@@ -329,5 +399,132 @@ describe('useDayMarker — the app calendar', () => {
     // account, and reusing the previous account's calendar ID would write this
     // user's milestones into a calendar they cannot see.
     expect(calendar.forget).toHaveBeenCalled()
+  })
+})
+
+/**
+ * Signing out is the deliberate counterpart of the token-death path: same three
+ * effects on the session (forget the token, forget the calendar, drop
+ * `connected`), reached on purpose rather than by a 401.
+ */
+describe('useDayMarker — signing out', () => {
+  it('drops the connection and the plan, and keeps the inputs', async () => {
+    const auth = sessionAuth()
+    const calendar = stubCalendar()
+    const { result } = renderHook(() => useDayMarker(deps({ auth, calendar })))
+    await act(async () => {
+      await result.current.connect()
+    })
+    act(() => result.current.setStartDate('2026-01-01'))
+    act(() => result.current.setLabel('Us'))
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+
+    act(() => result.current.signOut())
+
+    expect(result.current.connected).toBe(false)
+    expect(auth.token()).toBeNull()
+    // The next connect may be a different account, whose calendar is not this
+    // one -- the same reason the failed-probe path forgets it.
+    expect(calendar.forget).toHaveBeenCalled()
+    expect(result.current.plan).toEqual([])
+    expect(result.current.phase).toBe('idle')
+    expect(result.current.error).toBeNull()
+    // Signing out is not a reason to retype the date, so the inputs survive --
+    // and the milestone list they compute stays on screen, exactly as it does
+    // before anyone has connected at all.
+    expect(result.current.startDate).toBe('2026-01-01')
+    expect(result.current.label).toBe('Us')
+    expect(result.current.milestones).toHaveLength(13)
+  })
+
+  it('cannot be undone by a probe that was already in flight', async () => {
+    const auth = sessionAuth()
+    let arrive = () => {}
+    const latch = new Promise<void>((resolve) => {
+      arrive = () => resolve()
+    })
+    const api = stubApi()
+    ;(api.getEvent as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      await latch
+      return null
+    })
+    const { result } = renderHook(() => useDayMarker(deps({ auth, api })))
+    await act(async () => {
+      await result.current.connect()
+    })
+    act(() => result.current.setStartDate('2026-01-01'))
+    await waitFor(() => expect(result.current.phase).toBe('probing'))
+
+    act(() => result.current.signOut())
+    await act(async () => {
+      arrive()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    // A plan is a statement about a calendar this session can no longer read.
+    // Without invalidating the in-flight ticket, the reply to a request made
+    // while connected lands after the sign-out and puts the preview back --
+    // 'ready', with badges, beside a Connect button.
+    expect(result.current.phase).toBe('idle')
+    expect(result.current.plan).toEqual([])
+    expect(result.current.connected).toBe(false)
+  })
+
+  it('asks for the account chooser on the next connect', async () => {
+    const auth = sessionAuth()
+    const { result } = renderHook(() => useDayMarker(deps({ auth })))
+    await act(async () => {
+      await result.current.connect()
+    })
+    expect(auth.connect).toHaveBeenLastCalledWith('')
+
+    act(() => result.current.signOut())
+    await act(async () => {
+      await result.current.connect()
+    })
+
+    // The grant survives a sign-out, so prompt '' would silently hand back the
+    // same account -- a chooser is the only thing that can reach a second one.
+    // Asserted on the argument given to `auth`, because a popup Google owns is
+    // not observable from a hook test; check 9 in docs/manual-verification.md
+    // is where the popup itself is proven.
+    expect(auth.connect).toHaveBeenLastCalledWith('select_account')
+  })
+
+  it('returns to a silent re-authorization once the chooser has been shown', async () => {
+    const auth = sessionAuth()
+    const { result } = renderHook(() => useDayMarker(deps({ auth })))
+    act(() => result.current.signOut())
+    await act(async () => {
+      await result.current.connect()
+    })
+    expect(auth.connect).toHaveBeenLastCalledWith('select_account')
+
+    await act(async () => {
+      await result.current.connect()
+    })
+
+    // One chooser per sign-out. Leaving it latched would put an account picker
+    // in front of every later reconnect, including the one a dead token forces.
+    expect(auth.connect).toHaveBeenLastCalledWith('')
+  })
+
+  it('keeps the chooser pending when the connect it was meant for fails', async () => {
+    const auth = sessionAuth()
+    ;(auth.connect as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('popup_closed'),
+    )
+    const { result } = renderHook(() => useDayMarker(deps({ auth })))
+
+    act(() => result.current.signOut())
+    await act(async () => {
+      expect(await result.current.connect()).toBe(false)
+    })
+    await act(async () => {
+      await result.current.connect()
+    })
+
+    // The user asked for a chooser and a closed popup means they never saw one.
+    expect(auth.connect).toHaveBeenLastCalledWith('select_account')
   })
 })

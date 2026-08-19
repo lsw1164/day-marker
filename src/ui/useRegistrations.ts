@@ -5,6 +5,7 @@ import {
   SIGN_IN_CANCELLED,
   SIGN_IN_IN_PROGRESS,
   type Auth,
+  type GisPrompt,
 } from '@/google/auth'
 import type { AppCalendar } from '@/google/appCalendar'
 import type { CalendarApi } from '@/google/calendarApi'
@@ -69,6 +70,14 @@ export function useRegistrations({ auth, api, calendar, retryDeps }: Registratio
 
   // Guards against a slow load overwriting a newer one.
   const loadToken = useRef(0)
+
+  /**
+   * The prompt the next `connect()` sends. '' re-authorizes silently, which is
+   * right everywhere except straight after a sign-out: the grant outlives the
+   * token, so '' would hand back the account the user just left. A ref, not
+   * state, because nothing renders differently for it.
+   */
+  const nextPrompt = useRef<GisPrompt>('')
 
   /**
    * True from the moment confirmDelete's synchronous prologue runs until its
@@ -139,10 +148,13 @@ export function useRegistrations({ auth, api, calendar, retryDeps }: Registratio
     try {
       // Evaluated before any await so the popup survives the user gesture, and
       // awaited inside the try so a handler is always attached.
-      const promise = authRef.current.connect('')
+      const promise = authRef.current.connect(nextPrompt.current)
       await promise
       // Before `connected` flips, which is what releases the load effect.
       await calendarRef.current.ensure()
+      // Spent only once the connection it was meant for landed: a closed popup
+      // means the user never saw the chooser they asked for.
+      nextPrompt.current = ''
       setError(null)
       setConnected(true)
       return true
@@ -161,6 +173,22 @@ export function useRegistrations({ auth, api, calendar, retryDeps }: Registratio
   const refresh = useCallback(() => setLoadNonce((n) => n + 1), [])
 
   /**
+   * The three effects that end a session, in one place: forget the token, forget
+   * the calendar ID it resolved, and stop reporting as connected. Shared by the
+   * involuntary path (a dead token) and the deliberate one (signing out), which
+   * differ only in what else they clear.
+   *
+   * `calendar.forget()` is not housekeeping: the cached ID belongs to the
+   * account that just left, and reusing it for the next one would write their
+   * milestones into a calendar they cannot see.
+   */
+  const forgetSession = useCallback(() => {
+    setConnected(false)
+    authRef.current.clear()
+    calendarRef.current.forget()
+  }, [])
+
+  /**
    * The token died mid-run. Drops straight to the connect prompt so the user
    * can reconnect and finish the remainder, which is what COPY.deleteHalted
    * tells them to do -- and clears `confirming`/`results` on the way out,
@@ -170,10 +198,34 @@ export function useRegistrations({ auth, api, calendar, retryDeps }: Registratio
   const disconnectAfterHalt = useCallback(() => {
     setConfirming(null)
     setResults([])
-    setConnected(false)
-    authRef.current.clear()
-    calendarRef.current.forget()
-  }, [])
+    forgetSession()
+  }, [forgetSession])
+
+  /**
+   * The deliberate counterpart of the path above: the same session teardown,
+   * asked for rather than forced by a dead token. It additionally drops the
+   * list, which `disconnectAfterHalt` leaves in place — that path is offering a
+   * reconnect to finish the very run the list describes, and this one is
+   * handing the app to a different account.
+   */
+  const signOut = useCallback(() => {
+    // A delete owns the screen while it runs, and this is the most destructive
+    // way to interrupt it: clearing the token fails every event still queued,
+    // so a deletion the user cannot undo would report as errors they did not
+    // cause. Same guard beginConfirm, cancelConfirm and backToList use.
+    if (deletingRef.current) return
+    // Retires any load still in flight. Its request went out while the session
+    // was live, so its reply is well-formed and would land as a list read with
+    // the departed account's token.
+    loadToken.current += 1
+    nextPrompt.current = 'select_account'
+    setRegistrations([])
+    setConfirming(null)
+    setResults([])
+    setPhase('idle')
+    setError(null)
+    forgetSession()
+  }, [forgetSession])
 
   const beginConfirm = useCallback(
     (startDate: CalendarDate) => {
@@ -288,6 +340,7 @@ export function useRegistrations({ auth, api, calendar, retryDeps }: Registratio
     results,
     error,
     connect,
+    signOut,
     refresh,
     beginConfirm,
     cancelConfirm,
