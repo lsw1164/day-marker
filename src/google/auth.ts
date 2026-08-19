@@ -26,6 +26,24 @@ export const DRIVE_APPDATA_SCOPE = 'https://www.googleapis.com/auth/drive.appdat
 export const SCOPES = [CALENDAR_SCOPE, DRIVE_APPDATA_SCOPE] as const
 
 /**
+ * The signed-in address. Non-sensitive, and deliberately NOT part of `SCOPES`.
+ *
+ * The app is entirely usable without it: it only names which account is
+ * connected and lets the calendar deep link address that account instead of
+ * assuming the first one. Putting it in the verified set would mean a user who
+ * unticks this one box on Google's consent screen gets "Calendar permission was
+ * not granted" and no app at all -- a hard failure over a display detail.
+ *
+ * So it is requested, not required. `createAccount().ensure()` is allowed to
+ * fail, and every caller treats that as "no address to show" rather than as a
+ * failed connection.
+ */
+export const EMAIL_SCOPE = 'https://www.googleapis.com/auth/userinfo.email'
+
+/** What the popup asks for: the required set plus the optional address. */
+export const REQUESTED_SCOPES = [...SCOPES, EMAIL_SCOPE] as const
+
+/**
  * Sentinel for "VITE_GOOGLE_CLIENT_ID was never set". The human-readable copy
  * lives in `ui/copy.ts`; this layer only signals the condition, which keeps the
  * rule that `google/` never imports from `ui/`.
@@ -141,7 +159,8 @@ export function createAuth(
     if (client) return client
     client = gis.accounts.oauth2.initTokenClient({
       client_id: clientId,
-      scope: SCOPES.join(' '),
+      // Asks for the optional address too; only SCOPES is verified below.
+      scope: REQUESTED_SCOPES.join(' '),
       callback: (response) => {
         const pending = settle
         settle = null

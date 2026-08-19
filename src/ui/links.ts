@@ -8,14 +8,18 @@ import type { CalendarDate } from '@/domain/calendarDate'
  *
  * Unpadded numbers: the route rejects /2026/04/10.
  *
- * The /u/0/ segment pins the FIRST signed-in Google account. That is right for
- * the common single-account case and wrong for a user whose Day Marker calendar
- * lives under their second account, who will land on the wrong calendar and not
- * find the event. We cannot do better from here: the token carries no account
- * index, and asking for one would mean requesting a profile scope purely to
- * build a link.
+ * `authuser` names the account when we know it, which is what the optional
+ * `userinfo.email` scope buys. Without it the link has to fall back to /u/0/ --
+ * the FIRST signed-in account, which is right for the single-account case and
+ * wrong for a user whose Day Marker calendar lives under their second: they
+ * would land on the wrong calendar and not find the event. Naming the address
+ * removes that guess; falling back keeps the link working for anyone who
+ * declined the scope.
  */
-export function calendarMonthUrl(date: CalendarDate): string {
+export function calendarMonthUrl(date: CalendarDate, email = ''): string {
   const [y, m, d] = date.split('-').map(Number)
-  return `https://calendar.google.com/calendar/u/0/r/month/${y}/${m}/${d}`
+  const path = `r/month/${y}/${m}/${d}`
+  return email
+    ? `https://calendar.google.com/calendar/${path}?authuser=${encodeURIComponent(email)}`
+    : `https://calendar.google.com/calendar/u/0/${path}`
 }

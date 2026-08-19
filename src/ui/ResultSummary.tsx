@@ -17,11 +17,13 @@ export interface ResultSummaryProps {
    * simultaneously. This screen owns its own reporting.
    */
   error?: string | null
+  /** Addresses the calendar link at the signed-in account; '' falls back to /u/0/. */
+  email?: string
   onRetry: () => void
   onReset: () => void
 }
 
-export function ResultSummary({ results, error, onRetry, onReset }: ResultSummaryProps) {
+export function ResultSummary({ results, error, email = '', onRetry, onReset }: ResultSummaryProps) {
   const failed = results.filter((r) => r.outcome === 'failed')
   const succeeded = results.filter((r) => r.outcome !== 'failed')
   const first = succeeded[0]?.item.milestone.date
@@ -89,7 +91,7 @@ export function ResultSummary({ results, error, onRetry, onReset }: ResultSummar
               // base-ui composes via a `render` element instead.
               <Button
                 className="flex-1 min-h-11"
-                render={<a href={calendarMonthUrl(first)} target="_blank" rel="noreferrer" />}
+                render={<a href={calendarMonthUrl(first, email)} target="_blank" rel="noreferrer" />}
               >
                 {COPY.viewInCalendar}
               </Button>

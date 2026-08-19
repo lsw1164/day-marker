@@ -79,6 +79,7 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
       <div className="flex justify-end">
         <ConnectionStatus
           connected={state.connected}
+          email={state.email}
           // Hidden -- not disabled -- during a write: clearing the token mid-run
           // fails every event still queued, so the user would read a report full
           // of errors they did not cause. A disabled button would still advertise
@@ -121,6 +122,7 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
           <ResultSummary
             results={state.results}
             error={state.error}
+            email={state.email}
             onRetry={() => void state.retryFailed()}
             onReset={state.reset}
           />

@@ -84,6 +84,68 @@ function deps(overrides: Partial<DayMarkerDeps> = {}): DayMarkerDeps {
   }
 }
 
+describe('useDayMarker — the signed-in address', () => {
+  it('surfaces the address after connecting', async () => {
+    const d = deps({
+      account: {
+        ensure: vi.fn(async () => 'anna@example.com'),
+        email: vi.fn(() => 'anna@example.com'),
+        forget: vi.fn(),
+      },
+    })
+    const { result } = renderHook(() => useDayMarker(d))
+    await act(async () => {
+      await result.current.connect()
+    })
+    await waitFor(() => expect(result.current.email).toBe('anna@example.com'))
+  })
+
+  it('connects anyway when the address cannot be read', async () => {
+    // The arm the optional-scope design rests on. `userinfo.email` is requested
+    // but not verified, so a user who declines that one box gets a 403 here --
+    // and must still get a working app, not a failed connection with an error
+    // alert about a display detail.
+    const forget = vi.fn()
+    const d = deps({
+      account: {
+        ensure: vi.fn(async () => {
+          throw new Error('403 insufficient scope')
+        }),
+        email: vi.fn(() => ''),
+        forget,
+      },
+    })
+    const { result } = renderHook(() => useDayMarker(d))
+    await act(async () => {
+      await expect(result.current.connect()).resolves.toBe(true)
+    })
+    expect(result.current.connected).toBe(true)
+    expect(result.current.error).toBeNull()
+    expect(result.current.email).toBe('')
+  })
+
+  it('drops the address on sign-out, with the token that identified it', async () => {
+    const forget = vi.fn()
+    const d = deps({
+      account: {
+        ensure: vi.fn(async () => 'anna@example.com'),
+        email: vi.fn(() => 'anna@example.com'),
+        forget,
+      },
+    })
+    const { result } = renderHook(() => useDayMarker(d))
+    await act(async () => {
+      await result.current.connect()
+    })
+    await waitFor(() => expect(result.current.email).toBe('anna@example.com'))
+
+    act(() => result.current.signOut())
+
+    expect(result.current.email).toBe('')
+    expect(forget).toHaveBeenCalled()
+  })
+})
+
 describe('useDayMarker — local computation', () => {
   it('starts idle with no milestones', () => {
     const { result } = renderHook(() => useDayMarker(deps()))

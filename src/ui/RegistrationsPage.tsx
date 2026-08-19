@@ -191,6 +191,7 @@ export function RegistrationsPage({
         </h2>
         <ConnectionStatus
           connected={state.connected}
+          email={state.email}
           // Hidden while a delete runs, alongside the deletingRef guard in the
           // hook. Clearing the token mid-run halts the delete and fails every
           // event still queued -- the involuntary version of what

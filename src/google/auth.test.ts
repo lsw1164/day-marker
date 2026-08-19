@@ -4,6 +4,8 @@ import {
   CALENDAR_SCOPE,
   createAuth,
   DRIVE_APPDATA_SCOPE,
+  EMAIL_SCOPE,
+  REQUESTED_SCOPES,
   SCOPES,
   MISSING_CLIENT_ID,
   SIGN_IN_CANCELLED,
@@ -73,7 +75,29 @@ describe('scopes', () => {
   it('are requested together, space-delimited, as GIS expects', () => {
     const h = harness()
     void createAuth('client-1', () => h.gis).connect()
-    expect(h.requestedScope).toBe(`${CALENDAR_SCOPE} ${DRIVE_APPDATA_SCOPE}`)
+    // The optional address is asked for alongside the required pair -- one
+    // consent screen, not a second prompt later.
+    expect(h.requestedScope).toBe(`${CALENDAR_SCOPE} ${DRIVE_APPDATA_SCOPE} ${EMAIL_SCOPE}`)
+  })
+
+  it('asks for more than it verifies', () => {
+    // The distinction the design rests on: REQUESTED_SCOPES is what the popup
+    // shows, SCOPES is what a usable app needs. Collapsing them would make the
+    // address mandatory.
+    expect(REQUESTED_SCOPES).toContain(EMAIL_SCOPE)
+    expect(SCOPES).not.toContain(EMAIL_SCOPE)
+  })
+
+  it('connects when the user grants the required pair but declines the address', async () => {
+    // GIS renders one checkbox per scope, so declining just this one is a click.
+    // It must cost the address and nothing else -- the app is fully usable
+    // without knowing which account it is acting for.
+    const h = harness()
+    h.grantedScopes = [CALENDAR_SCOPE, DRIVE_APPDATA_SCOPE]
+    const auth = createAuth('client-1', () => h.gis)
+    const pending = auth.connect()
+    h.fire({ access_token: 'tok', expires_in: 3600 })
+    await expect(pending).resolves.toBe('tok')
   })
 
   /**

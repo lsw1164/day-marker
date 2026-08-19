@@ -11,6 +11,7 @@ import {
   type Auth,
   type GisPrompt,
 } from '@/google/auth'
+import type { Account } from '@/google/account'
 import type { AppCalendar } from '@/google/appCalendar'
 import type { CalendarApi } from '@/google/calendarApi'
 import { buildPlan, type PlanItem } from '@/google/plan'
@@ -24,6 +25,13 @@ export interface DayMarkerDeps {
   api: CalendarApi
   /** Resolves the ID every `api` call targets. See `google/appCalendar.ts`. */
   calendar: AppCalendar
+  /**
+   * Who the app is acting for. Optional because the address is optional: the
+   * `userinfo.email` scope is requested but not required, so a caller with no
+   * account resolver -- or a user who declined that one box -- gets an app that
+   * works and simply does not name the signed-in address.
+   */
+  account?: Account
   todayDate?: CalendarDate
   probeDelayMs?: number
   retryDeps?: RetryDeps
@@ -50,6 +58,7 @@ export function useDayMarker({
   auth,
   api,
   calendar,
+  account,
   todayDate = todayFn(),
   probeDelayMs = 400,
   retryDeps,
@@ -88,9 +97,11 @@ export function useDayMarker({
   const apiRef = useRef(api)
   const authRef = useRef(auth)
   const calendarRef = useRef(calendar)
+  const accountRef = useRef(account)
   apiRef.current = api
   authRef.current = auth
   calendarRef.current = calendar
+  accountRef.current = account
 
   const start = isCalendarDate(startDate) ? startDate : null
 
@@ -180,6 +191,8 @@ export function useDayMarker({
           // a different Google account, and that account has a different
           // calendar — or none yet.
           calendarRef.current.forget()
+          accountRef.current?.forget()
+          setEmail('')
         }
       })()
     }, probeDelayMs)
@@ -188,6 +201,8 @@ export function useDayMarker({
   }, [connected, options, milestones, todayDate, probeDelayMs, probeNonce])
 
   const [connecting, setConnecting] = useState(false)
+  /** '' when unknown: no scope, no resolver, or the lookup failed. */
+  const [email, setEmail] = useState('')
 
   /**
    * Returns whether a usable token was obtained. Callers need that answer:
@@ -223,6 +238,11 @@ export function useDayMarker({
         nextPrompt.current = ''
         setError(null)
         setConnected(true)
+        // Deliberately not awaited, and its failure deliberately swallowed. The
+        // address is optional -- awaiting it would add a round trip to the wait
+        // the user is already sitting through, and a 403 from a declined
+        // `userinfo.email` box must not turn a working connection into an error.
+        void accountRef.current?.ensure().then(setEmail, () => {})
         return true
       } catch (e) {
         const message = e instanceof Error ? e.message : ''
@@ -340,6 +360,10 @@ export function useDayMarker({
     setReprobePending(false)
     authRef.current.clear()
     calendarRef.current.forget()
+    // The next connect may be a different account, so the address must not
+    // outlive the token that identified it.
+    accountRef.current?.forget()
+    setEmail('')
   }, [])
 
   const reset = useCallback(() => {
@@ -367,6 +391,7 @@ export function useDayMarker({
     results,
     connected,
     connecting,
+    email,
     error,
     counts,
     failedCount,

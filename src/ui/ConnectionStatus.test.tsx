@@ -14,6 +14,32 @@ describe('ConnectionStatus', () => {
     expect(screen.getByText(COPY.connected)).toBeInTheDocument()
   })
 
+  it('names the account rather than only the state', () => {
+    // "Connected" cannot answer the question a user with a personal and a work
+    // account actually has: connected as whom?
+    render(<ConnectionStatus connected email="anna@example.com" canSignOut onSignOut={() => {}} />)
+    expect(screen.getByText('anna@example.com')).toBeInTheDocument()
+    expect(screen.queryByText(COPY.connected)).not.toBeInTheDocument()
+  })
+
+  it('falls back to the bare state when the address is unknown', () => {
+    // The user declined the optional scope, or the lookup failed. Still
+    // connected, and still able to sign out.
+    render(<ConnectionStatus connected canSignOut onSignOut={() => {}} />)
+    expect(screen.getByText(COPY.connected)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: COPY.signOut })).toBeInTheDocument()
+  })
+
+  it('shows no address while disconnected, even if one is passed', () => {
+    // The address outliving the session would say the app is still acting for
+    // someone it no longer has a token for.
+    render(
+      <ConnectionStatus connected={false} email="anna@example.com" canSignOut onSignOut={() => {}} />,
+    )
+    expect(screen.getByText(COPY.notConnected)).toBeInTheDocument()
+    expect(screen.queryByText('anna@example.com')).not.toBeInTheDocument()
+  })
+
   it('offers no sign-out while disconnected', () => {
     // There is no token to clear, so the control would name an action with
     // nothing behind it.

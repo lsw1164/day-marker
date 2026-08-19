@@ -5,6 +5,13 @@ import { COPY } from '@/ui/copy'
 export interface ConnectionStatusProps {
   connected: boolean
   /**
+   * The signed-in address, or '' when unknown -- the `userinfo.email` scope is
+   * optional, so this is absent for anyone who declined it. Shown in place of
+   * the bare word "Connected", which cannot answer the question a user with a
+   * personal and a work account actually has: connected as whom?
+   */
+  email?: string
+  /**
    * Whether signing out is offered at this moment. Each page decides for itself,
    * because each has a different run to protect: clearing the token mid-write or
    * mid-delete fails everything still queued, and the user would read a report
@@ -21,7 +28,12 @@ export interface ConnectionStatusProps {
  * the token without either page hearing about it. Only one route is mounted at a
  * time, so carrying this per page costs nothing.
  */
-export function ConnectionStatus({ connected, canSignOut, onSignOut }: ConnectionStatusProps) {
+export function ConnectionStatus({
+  connected,
+  email = '',
+  canSignOut,
+  onSignOut,
+}: ConnectionStatusProps) {
   return (
     <div className="flex shrink-0 items-center gap-1">
       <span className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -38,7 +50,14 @@ export function ConnectionStatus({ connected, canSignOut, onSignOut }: Connectio
             connected ? 'bg-primary' : 'bg-muted-foreground/40',
           )}
         />
-        {connected ? COPY.connected : COPY.notConnected}
+        {/*
+          The address if we have it, the bare state otherwise. `title` because a
+          long address is truncated rather than allowed to push the sign-out off
+          a narrow screen, and the full value should still be reachable.
+        */}
+        <span className="max-w-[12rem] truncate lg:max-w-xs" title={connected ? email : undefined}>
+          {connected ? email || COPY.connected : COPY.notConnected}
+        </span>
       </span>
       {connected && canSignOut && (
         <Button

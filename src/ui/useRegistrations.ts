@@ -7,6 +7,7 @@ import {
   type Auth,
   type GisPrompt,
 } from '@/google/auth'
+import type { Account } from '@/google/account'
 import type { AppCalendar } from '@/google/appCalendar'
 import type { CalendarApi } from '@/google/calendarApi'
 import { Unauthorized } from '@/google/errors'
@@ -28,6 +29,8 @@ export interface RegistrationsDeps {
   api: CalendarApi
   /** Resolves the ID every `api` call targets. See `google/appCalendar.ts`. */
   calendar: AppCalendar
+  /** Optional, for the same reason as in DayMarkerDeps: the address is optional. */
+  account?: Account
   retryDeps?: RetryDeps
 }
 
@@ -47,16 +50,18 @@ function isHaltedRun(results: DeleteResult[]): boolean {
   return results.some((r) => r.error === DELETE_HALTED)
 }
 
-export function useRegistrations({ auth, api, calendar, retryDeps }: RegistrationsDeps) {
+export function useRegistrations({ auth, api, calendar, account, retryDeps }: RegistrationsDeps) {
   // Read through refs for the same reason useDayMarker does: a caller building a
   // fresh deps object each render would otherwise retrigger the load effect on
   // every render, looping real Google requests against the user's quota.
   const apiRef = useRef(api)
   const authRef = useRef(auth)
   const calendarRef = useRef(calendar)
+  const accountRef = useRef(account)
   apiRef.current = api
   authRef.current = auth
   calendarRef.current = calendar
+  accountRef.current = account
 
   // The token is the single source of truth, so arriving from the other route
   // with a live token does not read as "not connected".
@@ -145,6 +150,8 @@ export function useRegistrations({ auth, api, calendar, retryDeps }: Registratio
   }, [connected, loadNonce])
 
   const [connecting, setConnecting] = useState(false)
+  /** '' when unknown: no scope, no resolver, or the lookup failed. */
+  const [email, setEmail] = useState('')
 
   const connect = useCallback(async (): Promise<boolean> => {
     // Before the first await, so a caller renders the busy state in the same
@@ -163,6 +170,10 @@ export function useRegistrations({ auth, api, calendar, retryDeps }: Registratio
       nextPrompt.current = ''
       setError(null)
       setConnected(true)
+      // Not awaited, and its failure swallowed: the address is optional, and a
+      // 403 from a declined `userinfo.email` box must not turn a working
+      // connection into an error. See useDayMarker for the same call.
+      void accountRef.current?.ensure().then(setEmail, () => {})
       return true
     } catch (e) {
       const message = e instanceof Error ? e.message : ''
@@ -196,6 +207,10 @@ export function useRegistrations({ auth, api, calendar, retryDeps }: Registratio
     setConnected(false)
     authRef.current.clear()
     calendarRef.current.forget()
+    // The next connect may be a different account, so the address must not
+    // outlive the token that identified it.
+    accountRef.current?.forget()
+    setEmail('')
   }, [])
 
   /**
@@ -346,6 +361,7 @@ export function useRegistrations({ auth, api, calendar, retryDeps }: Registratio
     phase,
     connected,
     connecting,
+    email,
     registrations,
     confirming,
     results,
