@@ -4,9 +4,15 @@ Enter the date something started; Day Marker writes its milestone anniversaries 
 Day 100, Day 200, …, 1 Year, 2 Years — into your Google Calendar.
 
 No backend, no database, no accounts. The page talks to Google directly from your
-browser, and nothing about you is stored anywhere else.
+browser. The only thing it remembers lives in your own Google account, not on any
+server of ours.
 
 ## How it works
+
+Day Marker writes to a calendar it creates for you, named **Day Marker**, rather
+than to your primary calendar. Hide it with one checkbox in Google Calendar's
+sidebar, or delete every milestone it ever wrote by deleting that one calendar —
+Day Marker notices it is gone and starts fresh next time.
 
 Each event's ID is derived deterministically from `(start date, milestone)`, so the
 calendar itself is the only state the app needs. Before writing, it reads the ID of
@@ -36,11 +42,15 @@ older Node is the most common first-run failure. Run every command from the repo
 root.
 
 1. In the [Google Cloud Console](https://console.cloud.google.com): enable the
-   **Google Calendar API**, configure an **External** OAuth consent screen with the
-   scope `https://www.googleapis.com/auth/calendar.events`, add your own account
-   under **Test users**, and create a **Web application** OAuth client ID with
-   `http://localhost:5173` as an authorized JavaScript origin. Leave **Authorized
-   redirect URIs** empty — the token client does not use one.
+   **Google Calendar API** *and* the **Google Drive API**, configure an
+   **External** OAuth consent screen with these two scopes —
+
+   - `https://www.googleapis.com/auth/calendar.app.created`
+   - `https://www.googleapis.com/auth/drive.appdata`
+
+   — and create a **Web application** OAuth client ID with `http://localhost:5173`
+   as an authorized JavaScript origin. Leave **Authorized redirect URIs** empty —
+   the token client does not use one.
 2. `cp .env.local.example .env.local` and paste the client ID in as
    `VITE_GOOGLE_CLIENT_ID`.
 3. `npm install && npm run dev`, then open <http://localhost:5173>.
@@ -48,13 +58,20 @@ root.
 `VITE_GOOGLE_CLIENT_ID` is public by design and ships in the bundle. There is no
 client secret in this flow.
 
-`calendar.events` is a Google *sensitive* scope. While the OAuth consent screen is
-in Testing, only accounts listed as test users can sign in (up to 100), and they
-will see Google's "Google hasn't verified this app" warning when they connect —
-click through it (**Advanced → Go to …**). Taking the app public requires
-sensitive-scope verification, which Google documents as taking up to 10 days, but
-unlike restricted scopes (Gmail, Drive), it does not require Google's CASA security
-assessment.
+Both scopes are on Google's **non-sensitive** list, which is deliberate and is the
+reason the app can be published without OAuth verification: no review, no 100-user
+cap, no "Google hasn't verified this app" screen. `calendar.app.created` grants
+access only to calendars this app itself created — never to your primary calendar
+or anyone else's — and `drive.appdata` reaches only its own hidden folder.
+
+Widening either one (to `calendar.events`, `calendar`, or `drive.file`) moves the
+project onto the sensitive list and back behind verification, so treat the pair in
+`src/google/auth.ts` as load-bearing. `src/google/auth.test.ts` pins both strings
+for that reason.
+
+If you used a build of Day Marker from before 2026-08-19, its events are on your
+primary calendar and the new scope cannot see them — they will not appear under
+Registrations, and you will need to remove them by hand.
 
 ## Commands
 

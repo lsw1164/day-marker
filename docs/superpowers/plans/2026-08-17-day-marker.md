@@ -14,7 +14,7 @@
 
 These apply to every task. Values are copied verbatim from the spec.
 
-- **OAuth scope is exactly `https://www.googleapis.com/auth/calendar.events`.** Do not add scopes.
+- **OAuth scope is exactly `https://www.googleapis.com/auth/calendar.events`.** Do not add scopes. *(Historical: this plan executed under that constraint. Superseded 2026-08-19 by `calendar.app.created` + `drive.appdata` — see `docs/superpowers/specs/2026-08-19-app-created-scope-design.md`.)*
 - **Event IDs must match `/^[0-9a-v]{5,1024}$/`** — Google's base32hex alphabet is lowercase `a`–`v` and digits `0`–`9`. One stray `w` is a 400.
 - **Event IDs depend on the start date and milestone key ONLY** — never on title, label, reminder, `years`, or UI language. This is what makes re-submission an update rather than a duplication. Never weaken it.
 - **Milestone keys (`d100`, `y1`) are independent of display labels.** Rewording a label must never change a key.

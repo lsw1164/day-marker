@@ -57,9 +57,11 @@ impossible. The original spec already assumed this.
 
 ## Constraints
 
-- **No new OAuth scope.** `calendar.events` already covers `events.list` and
-  `events.delete` on the primary calendar. The consent screen does not change, and
-  the sensitive-scope verification position is unaffected.
+- **~~No new OAuth scope.~~** *Superseded 2026-08-19.* True as designed, but the
+  scope itself was replaced afterwards: `calendar.app.created` covers
+  `events.list` and `events.delete` on the app's own calendar just as
+  `calendar.events` did on `primary`, so nothing in this design changed — the
+  discovery query and the delete flow are untouched. See `2026-08-19-app-created-scope-design.md`.
 - **No new stamped field.** Discovery and deletion use data already present on
   every event.
 - **`dayMarkerVersion` is the discovery predicate.** The query filters on
@@ -144,7 +146,7 @@ byte-identical is worth more than tidiness.
 
 ## Discovery
 
-`listEvents` issues `GET /calendars/primary/events` with
+`listEvents` issues `GET /calendars/{app calendar}/events` with
 `privateExtendedProperty=dayMarkerVersion%3D1`, following `nextPageToken` until
 exhausted. `showDeleted` is left at its default of `false`, so cancelled
 events are excluded — with one documented exception. Google's `events.list`
@@ -189,7 +191,7 @@ creation time is not recorded anywhere.
 
 ## Deletion
 
-`deleteEvent(id)` issues `DELETE /calendars/primary/events/{id}`. Status mapping
+`deleteEvent(id)` issues `DELETE /calendars/{app calendar}/events/{id}`. Status mapping
 extends the existing typed-error scheme with one addition:
 
 | Response | Meaning |

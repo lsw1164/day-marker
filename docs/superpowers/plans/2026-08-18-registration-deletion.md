@@ -16,7 +16,7 @@
 
 Every task's requirements implicitly include this section. The first six carry over from the prior plan and remain in force.
 
-- **OAuth scope stays exactly `https://www.googleapis.com/auth/calendar.events`.** It already covers `events.list` and `events.delete` on the primary calendar. Do not add scopes.
+- **OAuth scope stays exactly `https://www.googleapis.com/auth/calendar.events`.** It already covers `events.list` and `events.delete` on the primary calendar. Do not add scopes. *(Historical: this plan executed under that constraint. Superseded 2026-08-19 — see `docs/superpowers/specs/2026-08-19-app-created-scope-design.md`.)*
 - **Event IDs must not change.** They remain `sha256('daymarker/v1/' + start + '/' + key)` truncated to 30 base32hex chars with a `dm` prefix. The golden test pinning three IDs must keep passing; if it fails, stop and report rather than updating it.
 - **Never put the access token in `localStorage`** or any persistent storage. A theme preference under `dayMarker.theme` is unrelated and permitted.
 - **`src/` may not import Node builtins.** `tsconfig.json` omits `"node"` from `types` on purpose; never widen it. Files needing Node live at the repo root under `tsconfig.node.json`.

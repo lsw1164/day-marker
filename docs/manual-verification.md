@@ -4,9 +4,16 @@ The unit suite mocks `fetch`, so checks 1–5 can only be confirmed against a re
 Google Calendar. Run them after any change to `src/domain/eventPayload.ts`,
 `src/google/apply.ts`, or `src/google/plan.ts`.
 
-Checks 6–10 cover things a mocked, jsdom-based suite cannot see at all: a
-pre-paint script, native browser chrome, a real deployed host, and a real
-Google popup. Run the full ten before any deploy.
+Checks 6–13 cover things a mocked, jsdom-based suite cannot see at all: a
+pre-paint script, native browser chrome, a real deployed host, a real Google
+popup, and — since 2026-08-19 — whether the app's own calendar and its Drive
+pointer actually agree across accounts and devices. Run the full thirteen before
+any deploy.
+
+Checks 11–13 are the ones that matter most after the scope change. They are the
+only place the "one calendar per user, ever" invariant can be observed: with
+`calendar.app.created` the app cannot list calendars, so a duplicate is invisible
+to the code and shows up only as a user receiving two sets of reminders.
 
 **This checklist has not yet been run.** Append an entry to the log at the bottom
 every time it is: record the date, who ran it, and the result of each check. On a
@@ -154,6 +161,47 @@ an ID-versioning escape hatch.
   unknown — Google purged the events and refused to reuse their IDs — and it is
   the evidence needed to decide on ID versioning.
 
+## 11. The app creates exactly one calendar, and finds it again
+
+The invariant the whole scope design rests on. Unit tests pin the branches; only
+a real account proves the two halves — Drive and Calendar — agree.
+
+- Connect with an account that has never used Day Marker. Register a start date.
+- Open Google Calendar. **Expect:** a calendar named **Day Marker** in the
+  sidebar, holding the milestones. Your primary calendar has none of them.
+- Reload the page and connect again. Register a *second* start date.
+- **Expect:** still one **Day Marker** calendar, now holding both registrations.
+- **If a second calendar appeared:** record how many, and whether the Drive
+  app-data file was written — Drive → Settings → *Manage apps* shows Day Marker's
+  hidden data and its size. Two calendars means `appCalendar.ts` failed to read
+  back the pointer it wrote, which is the one failure mode that produces
+  duplicate reminders.
+
+## 12. A second browser finds the same registrations
+
+This is what the Drive app-data folder buys over `localStorage`, and it cannot be
+observed in one browser profile.
+
+- After check 11, open the app in a different browser (or a private window),
+  connect with the **same** Google account, and open **Registrations**.
+- **Expect:** both registrations listed, and no new calendar created.
+- **If the list is empty or a second calendar appears:** record whether the
+  consent screen asked for the Drive permission on this browser. A user who
+  unchecked it should have been refused the connection outright.
+
+## 13. Deleting the calendar in Google Calendar is a clean reset
+
+The affordance this scope change exists to give the user.
+
+- With registrations in place, delete the **Day Marker** calendar in Google
+  Calendar (Settings → *Day Marker* → *Remove calendar* → *Delete*).
+- Return to the app, reload, connect, and register a start date.
+- **Expect:** a new **Day Marker** calendar, and no error — the pointer was
+  repointed rather than duplicated. **Registrations** lists only what you have
+  registered since.
+- **If it reports an error instead:** record the exact message. A 404 surfacing
+  to the user means `calendars.get` did not run before the events did.
+
 ## Log
 
 No runs recorded yet. Append one line per run in this format, keeping failed
@@ -167,5 +215,8 @@ YYYY-MM-DD — <name> — 1: <pass|fail> — 2: <pass|fail> — 3: <pass|fail> �
 8: <pass|fail, and which host if it failed> —
 9: <pass|fail, and which screen if it failed> —
 10: <pass|fail, and which route it took, or the exact error if Failed> —
+11: <pass|fail, and how many calendars if it failed> —
+12: <pass|fail, and whether Drive consent was asked if it failed> —
+13: <pass|fail, and the exact error if it failed> —
 notes: <anything from a "record" bullet above, or "none">
 ```

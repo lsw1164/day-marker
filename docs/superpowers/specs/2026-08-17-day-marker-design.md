@@ -19,7 +19,9 @@ arithmetic, not about language, and it does not change with the UI copy.
 ## Goals
 
 - Compute milestones from a start date, correctly.
-- Write them to the signed-in user's primary Google Calendar as all-day events.
+- Write them to a Google Calendar as all-day events. *(Amended 2026-08-19: to a
+  secondary calendar the app creates, not the user's primary — see
+  `2026-08-19-app-created-scope-design.md`.)*
 - Show, before writing, precisely what will happen to each milestone.
 - Be safe to run twice: re-submitting updates rather than duplicates.
 
@@ -36,12 +38,13 @@ arithmetic, not about language, and it does not change with the UI copy.
 
 ## Constraints
 
-**`calendar.events` is a Google *sensitive* scope.** While the OAuth consent
-screen is in Testing, at most 100 named test users can authorize the app, and
-they see a "Google hasn't verified this app" interstitial. Public launch requires
-sensitive-scope verification, which Google documents as taking up to 10 days. It
-does *not* require the CASA security assessment that restricted scopes (Gmail,
-Drive) trigger.
+**~~`calendar.events` is a Google *sensitive* scope.~~** *Superseded
+2026-08-19.* It was, and that capped the project at 100 users for its lifetime
+and put a "Google hasn't verified this app" interstitial in front of every one of
+them. The app now requests `calendar.app.created` and `drive.appdata`, both
+non-sensitive, and needs no verification to launch. The reasoning, and the
+`calendarList.list` gap that forced a Drive-backed pointer, are in
+`2026-08-19-app-created-scope-design.md`.
 
 The commonly-cited "test-user grants expire after 7 days" gotcha does not affect
 us: we hold no refresh token and request a fresh access token every session.
@@ -198,7 +201,9 @@ Google Identity Services, loaded from `https://accounts.google.com/gsi/client`.
 ```ts
 google.accounts.oauth2.initTokenClient({
   client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-  scope: 'https://www.googleapis.com/auth/calendar.events',
+  // Amended 2026-08-19: two non-sensitive scopes, granted as a unit.
+  scope: 'https://www.googleapis.com/auth/calendar.app.created' +
+         ' https://www.googleapis.com/auth/drive.appdata',
   callback, error_callback,
 })
 ```
@@ -217,9 +222,10 @@ client secret in this flow.
 
 ### API (`calendarApi.ts`)
 
-Plain `fetch` against `https://www.googleapis.com/calendar/v3/calendars/primary/events`,
+Plain `fetch` against `https://www.googleapis.com/calendar/v3/calendars/{id}/events`,
 with `Authorization: Bearer <token>`. No `gapi.client`, no discovery document, no
-API key.
+API key. *(Amended 2026-08-19: `{id}` was `primary`; it is now the app-created
+calendar, resolved by `appCalendar.ts`.)*
 
 Three calls: `getEvent(id)`, `insertEvent(payload)`, `patchEvent(id, partial)`.
 HTTP status maps to typed errors — `Unauthorized`, `RateLimited`, `Conflict`,
@@ -369,8 +375,11 @@ flow is interactive and cannot run headless.
 ## Setup
 
 1. Google Cloud project → enable the Google Calendar API.
-2. OAuth consent screen: External, scope `calendar.events`, app name and support
-   email filled in; add test users while in Testing.
+2. OAuth consent screen: External, scopes `calendar.app.created` and
+   `drive.appdata`, app name and support email filled in. *(Amended 2026-08-19;
+   also enable the Google Drive API in step 1. Both scopes are non-sensitive, so
+   Testing and its test-user list are no longer a prerequisite for other people
+   to use the app.)*
 3. Credentials → OAuth 2.0 Client ID → **Web application**. Authorized JavaScript
    origins: `http://localhost:5173` and the deployed origin. No redirect URI and
    no client secret are needed for the token-client flow.
@@ -387,8 +396,9 @@ Recorded so they aren't rediscovered as bugs:
   milestone keys, event IDs, and all arithmetic are unaffected by labels, so this
   would be a presentation-layer change plus a decision about existing events'
   titles.
-- Choosing a non-primary or dedicated calendar (would need the broader `calendar`
-  scope).
+- ~~Choosing a non-primary or dedicated calendar (would need the broader
+  `calendar` scope).~~ *Done 2026-08-19 — via `calendar.app.created`, which is
+  narrower than `calendar.events` rather than broader. See `2026-08-19-app-created-scope-design.md`.*
 - Custom milestone intervals beyond the 100-day step.
 - Multiple simultaneous anniversaries. Today, one start date is one anniversary,
   which is what makes the ID scheme unambiguous.
