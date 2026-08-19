@@ -8,6 +8,7 @@ import {
   type GisPrompt,
 } from '@/google/auth'
 import type { Account } from '@/google/account'
+import type { SessionHint } from '@/google/session'
 import type { AppCalendar } from '@/google/appCalendar'
 import type { CalendarApi } from '@/google/calendarApi'
 import { Unauthorized } from '@/google/errors'
@@ -31,6 +32,8 @@ export interface RegistrationsDeps {
   calendar: AppCalendar
   /** Optional, for the same reason as in DayMarkerDeps: the address is optional. */
   account?: Account
+  /** Whether this browser has connected before. See google/session.ts. */
+  session?: SessionHint
   retryDeps?: RetryDeps
 }
 
@@ -50,7 +53,14 @@ function isHaltedRun(results: DeleteResult[]): boolean {
   return results.some((r) => r.error === DELETE_HALTED)
 }
 
-export function useRegistrations({ auth, api, calendar, account, retryDeps }: RegistrationsDeps) {
+export function useRegistrations({
+  auth,
+  api,
+  calendar,
+  account,
+  session,
+  retryDeps,
+}: RegistrationsDeps) {
   // Read through refs for the same reason useDayMarker does: a caller building a
   // fresh deps object each render would otherwise retrigger the load effect on
   // every render, looping real Google requests against the user's quota.
@@ -58,10 +68,12 @@ export function useRegistrations({ auth, api, calendar, account, retryDeps }: Re
   const authRef = useRef(auth)
   const calendarRef = useRef(calendar)
   const accountRef = useRef(account)
+  const sessionRef = useRef(session)
   apiRef.current = api
   authRef.current = auth
   calendarRef.current = calendar
   accountRef.current = account
+  sessionRef.current = session
 
   // The token is the single source of truth, so arriving from the other route
   // with a live token does not read as "not connected".
@@ -162,10 +174,14 @@ export function useRegistrations({ auth, api, calendar, account, retryDeps }: Re
    */
   const [email, setEmail] = useState(() => account?.email() ?? '')
 
-  const connect = useCallback(async (): Promise<boolean> => {
+  /**
+   * Shared by the deliberate and the silent paths, which differ only in what a
+   * failure means -- see useDayMarker for the same split.
+   */
+  const establish = useCallback(async (silent: boolean): Promise<boolean> => {
     // Before the first await, so a caller renders the busy state in the same
-    // commit as the click. Nothing is awaited ahead of requestAccessToken, so
-    // the popup still opens inside the user gesture.
+    // commit as the click. Nothing is awaited ahead of requestAccessToken, so a
+    // deliberate connect's popup still opens inside the user gesture.
     setConnecting(true)
     try {
       // Evaluated before any await so the popup survives the user gesture, and
@@ -179,6 +195,9 @@ export function useRegistrations({ auth, api, calendar, account, retryDeps }: Re
       nextPrompt.current = ''
       setError(null)
       setConnected(true)
+      // Recorded only on success, so a browser that never completed a
+      // connection never attempts a silent one.
+      sessionRef.current?.remember()
       // Not awaited, and its failure swallowed: the address is optional, and a
       // 403 from a declined `userinfo.email` box must not turn a working
       // connection into an error. See useDayMarker for the same call.
@@ -190,6 +209,13 @@ export function useRegistrations({ auth, api, calendar, account, retryDeps }: Re
       if (message === SIGN_IN_IN_PROGRESS) return false
       // clear() abandoned this call; that path reports its own error.
       if (message === SIGN_IN_CANCELLED) return false
+      if (silent) {
+        // Information, not a fault to report: the grant is gone, so drop the
+        // hint rather than greeting a returning visitor with an alert about
+        // something they did not do and cannot act on.
+        sessionRef.current?.forget()
+        return false
+      }
       setError(describeError(e))
       setConnected(false)
       return false
@@ -221,6 +247,20 @@ export function useRegistrations({ auth, api, calendar, account, retryDeps }: Re
     accountRef.current?.forget()
     setEmail('')
   }, [])
+
+  const connect = useCallback(() => establish(false), [establish])
+
+  /**
+   * Exchanges a grant that survived the reload for a fresh token, with no prompt
+   * and no interaction. Mount-only and gated on the hint, so a first-time
+   * visitor fires nothing. Reads the token through the ref rather than the
+   * `connected` state, which would be stale in a mount-only effect.
+   */
+  useEffect(() => {
+    if (authRef.current.token() !== null) return
+    if (!sessionRef.current?.present()) return
+    void establish(true)
+  }, [establish])
 
   /**
    * The token died mid-run. Drops straight to the connect prompt so the user
@@ -259,6 +299,10 @@ export function useRegistrations({ auth, api, calendar, account, retryDeps }: Re
     setPhase('idle')
     setError(null)
     forgetSession()
+    // Here rather than in forgetSession: disconnectAfterHalt shares that helper
+    // and is offering to reconnect and finish the run, so it must keep the hint.
+    // Signing out is the one case where the user has asked the app to stop.
+    sessionRef.current?.forget()
   }, [forgetSession])
 
   const beginConfirm = useCallback(

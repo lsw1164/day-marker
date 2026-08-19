@@ -84,6 +84,78 @@ function deps(overrides: Partial<DayMarkerDeps> = {}): DayMarkerDeps {
   }
 }
 
+function hint(present: boolean) {
+  return {
+    present: vi.fn(() => present),
+    remember: vi.fn(),
+    forget: vi.fn(),
+  }
+}
+
+describe('useDayMarker — resuming a session', () => {
+  it('asks for nothing on a first visit', () => {
+    // The path that must stay silent. Without the hint gate, every first-time
+    // visitor would fire a doomed GIS call on every page load.
+    const d = deps({ session: hint(false) })
+    renderHook(() => useDayMarker(d))
+    expect(d.auth.connect).not.toHaveBeenCalled()
+  })
+
+  it('exchanges a surviving grant for a fresh token, with no prompt', async () => {
+    // The token dies with the tab by design; the user's grant does not. A
+    // returning visitor should not be asked to re-approve what they approved.
+    const d = deps({ session: hint(true) })
+    const { result } = renderHook(() => useDayMarker(d))
+    await waitFor(() => expect(result.current.connected).toBe(true))
+    expect(d.auth.connect).toHaveBeenCalledWith('')
+  })
+
+  it('reports nothing when the silent attempt fails, and stops trying', async () => {
+    // A revoked grant is information, not a fault the user caused. An alert here
+    // would greet a returning visitor with an error they cannot act on.
+    const session = hint(true)
+    const d = deps({ session })
+    ;(d.auth.connect as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('access_denied'))
+    const { result } = renderHook(() => useDayMarker(d))
+    await waitFor(() => expect(session.forget).toHaveBeenCalled())
+    expect(result.current.error).toBeNull()
+    expect(result.current.connected).toBe(false)
+  })
+
+  it('does not resume when a token is already live', () => {
+    // Arriving from the other tab with a live session: nothing to exchange.
+    const d = deps({ session: hint(true) })
+    ;(d.auth.token as ReturnType<typeof vi.fn>).mockReturnValue('tok')
+    renderHook(() => useDayMarker(d))
+    expect(d.auth.connect).not.toHaveBeenCalled()
+  })
+
+  it('remembers only after a connection actually lands', async () => {
+    const session = hint(false)
+    const d = deps({ session })
+    const { result } = renderHook(() => useDayMarker(d))
+    expect(session.remember).not.toHaveBeenCalled()
+    await act(async () => {
+      await result.current.connect()
+    })
+    expect(session.remember).toHaveBeenCalled()
+  })
+
+  it('forgets on sign-out, but not on a probe failure', async () => {
+    // A failed probe may be a transient 500 with the grant still valid, so
+    // dropping the hint there would cost that user a click for nothing. Signing
+    // out is the one case where they have asked the app to stop.
+    const session = hint(true)
+    const d = deps({ session })
+    const { result } = renderHook(() => useDayMarker(d))
+    await waitFor(() => expect(result.current.connected).toBe(true))
+    session.forget.mockClear()
+
+    act(() => result.current.signOut())
+    expect(session.forget).toHaveBeenCalled()
+  })
+})
+
 describe('useDayMarker — the signed-in address', () => {
   it('surfaces the address after connecting', async () => {
     const d = deps({

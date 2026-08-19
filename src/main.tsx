@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createAccount } from '@/google/account'
+import { createSessionHint } from '@/google/session'
 import { createAppCalendar } from '@/google/appCalendar'
 import { createAppDataStore } from '@/google/appData'
 import { createAuth } from '@/google/auth'
@@ -20,9 +21,10 @@ const token = () => auth.token() ?? ''
 const calendar = createAppCalendar(createAppDataStore(token), createCalendarsApi(token))
 const api = createCalendarApi(token, () => calendar.id())
 const account = createAccount(token)
+const session = createSessionHint()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <Root deps={{ auth, api, calendar, account }} />
+    <Root deps={{ auth, api, calendar, account, session }} />
   </StrictMode>,
 )

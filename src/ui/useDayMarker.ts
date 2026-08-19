@@ -12,6 +12,7 @@ import {
   type GisPrompt,
 } from '@/google/auth'
 import type { Account } from '@/google/account'
+import type { SessionHint } from '@/google/session'
 import type { AppCalendar } from '@/google/appCalendar'
 import type { CalendarApi } from '@/google/calendarApi'
 import { buildPlan, type PlanItem } from '@/google/plan'
@@ -32,6 +33,11 @@ export interface DayMarkerDeps {
    * works and simply does not name the signed-in address.
    */
   account?: Account
+  /**
+   * Whether this browser has connected before. Optional: without it the app
+   * simply never attempts a silent reconnect and every load costs one click.
+   */
+  session?: SessionHint
   todayDate?: CalendarDate
   probeDelayMs?: number
   retryDeps?: RetryDeps
@@ -59,6 +65,7 @@ export function useDayMarker({
   api,
   calendar,
   account,
+  session,
   todayDate = todayFn(),
   probeDelayMs = 400,
   retryDeps,
@@ -98,10 +105,12 @@ export function useDayMarker({
   const authRef = useRef(auth)
   const calendarRef = useRef(calendar)
   const accountRef = useRef(account)
+  const sessionRef = useRef(session)
   apiRef.current = api
   authRef.current = auth
   calendarRef.current = calendar
   accountRef.current = account
+  sessionRef.current = session
 
   const start = isCalendarDate(startDate) ? startDate : null
 
@@ -214,21 +223,16 @@ export function useDayMarker({
   const [email, setEmail] = useState(() => account?.email() ?? '')
 
   /**
-   * Returns whether a usable token was obtained. Callers need that answer:
-   * `retryFailed` must not write with a dead token, and it cannot read the
-   * `connected` state to find out — that value is captured in this callback's
-   * closure and would be stale.
+   * The whole connect sequence, shared by the deliberate and the silent paths.
+   * They differ only in what a failure means: a click that fails is worth
+   * reporting, and a silent attempt that fails is worth forgetting.
    */
-  const connect = useCallback(
-    async (prompt?: GisPrompt): Promise<boolean> => {
-      // An explicit argument always wins; `undefined` means "whatever the last
-      // sign-out left pending", which is how the chooser reaches the button in
-      // App.tsx without that button knowing anything about sign-out.
-      const chosen = prompt ?? nextPrompt.current
+  const establish = useCallback(
+    async (chosen: GisPrompt, silent: boolean): Promise<boolean> => {
       // Set before the first await, so a caller that renders off this flag shows
       // the busy state in the same commit as the click rather than a frame later.
-      // Reading nextPrompt above is synchronous, and nothing is awaited between
-      // here and requestAccessToken, so the popup still opens inside the gesture.
+      // Nothing is awaited before requestAccessToken, so a deliberate connect's
+      // popup still opens inside the user gesture.
       setConnecting(true)
       try {
         // Called before any await so the popup survives the user gesture. It stays
@@ -247,6 +251,9 @@ export function useDayMarker({
         nextPrompt.current = ''
         setError(null)
         setConnected(true)
+        // Recorded only on success, so a browser that has never completed a
+        // connection never attempts a silent one.
+        sessionRef.current?.remember()
         // Deliberately not awaited, and its failure deliberately swallowed. The
         // address is optional -- awaiting it would add a round trip to the wait
         // the user is already sitting through, and a 403 from a declined
@@ -262,6 +269,15 @@ export function useDayMarker({
         // reporting its own error; overwriting it with this one would replace the
         // real cause with a symptom.
         if (message === SIGN_IN_CANCELLED) return false
+        if (silent) {
+          // A silent attempt failing is information, not a fault to report: the
+          // grant is gone -- revoked, or this is a different browser profile --
+          // so drop the hint and let the user connect deliberately. Surfacing an
+          // alert here would greet a returning visitor with an error they did
+          // not cause and cannot act on.
+          sessionRef.current?.forget()
+          return false
+        }
         setError(describe(e))
         setConnected(false)
         return false
@@ -274,6 +290,36 @@ export function useDayMarker({
     },
     [],
   )
+
+  /**
+   * Returns whether a usable token was obtained. Callers need that answer:
+   * `retryFailed` must not write with a dead token, and it cannot read the
+   * `connected` state to find out — that value is captured in this callback's
+   * closure and would be stale.
+   */
+  const connect = useCallback(
+    // An explicit argument always wins; `undefined` means "whatever the last
+    // sign-out left pending", which is how the chooser reaches the button in
+    // App.tsx without that button knowing anything about sign-out.
+    (prompt?: GisPrompt) => establish(prompt ?? nextPrompt.current, false),
+    [establish],
+  )
+
+  /**
+   * The token dies with the tab by design, but the user's grant does not. On a
+   * reload this exchanges that surviving grant for a fresh token with no prompt
+   * and no interaction, so a returning visitor is not asked to re-approve what
+   * they already approved.
+   *
+   * Mount-only, and gated on the hint: a first-time visitor must not fire a
+   * doomed GIS call on every page load. Reads the token through the ref rather
+   * than the `connected` state, which would be stale in a mount-only effect.
+   */
+  useEffect(() => {
+    if (authRef.current.token() !== null) return
+    if (!sessionRef.current?.present()) return
+    void establish('', true)
+  }, [establish])
 
   const toggle = useCallback((key: string) => {
     setPlan((current) =>
@@ -373,6 +419,11 @@ export function useDayMarker({
     // outlive the token that identified it.
     accountRef.current?.forget()
     setEmail('')
+    // Forgotten here but NOT on the probe-failure path above: a failed probe may
+    // be a transient 500 with the grant still perfectly valid, and dropping the
+    // hint would cost that user a click on their next load for nothing. Signing
+    // out is the one case where the user has said they want the app to stop.
+    sessionRef.current?.forget()
   }, [])
 
   const reset = useCallback(() => {
