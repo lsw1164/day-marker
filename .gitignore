@@ -1,7 +1,10 @@
 .superpowers/
 node_modules/
 dist/
-.env.local
+.env
+.env.*
+# The only env file that belongs in the repo — it holds a placeholder, not a key.
+!.env.local.example
 .worktrees/
 *.local
 .DS_Store
