@@ -150,8 +150,17 @@ export function useRegistrations({ auth, api, calendar, account, retryDeps }: Re
   }, [connected, loadNonce])
 
   const [connecting, setConnecting] = useState(false)
-  /** '' when unknown: no scope, no resolver, or the lookup failed. */
-  const [email, setEmail] = useState('')
+  /**
+   * Seeded from the resolver, not from '' — the same rule `connected` follows one
+   * screen up. A `<Route element>` unmounts on navigation, so this hook's state
+   * does not survive a tab switch, but the `account` singleton above both pages
+   * still holds the address it already fetched. Starting empty made the address
+   * vanish on every tab change and then not come back, since `ensure()` is only
+   * called from `connect()` and the user is already connected.
+   *
+   * '' still means unknown: no scope, no resolver, or the lookup failed.
+   */
+  const [email, setEmail] = useState(() => account?.email() ?? '')
 
   const connect = useCallback(async (): Promise<boolean> => {
     // Before the first await, so a caller renders the busy state in the same

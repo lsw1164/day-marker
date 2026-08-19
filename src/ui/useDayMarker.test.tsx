@@ -100,6 +100,24 @@ describe('useDayMarker — the signed-in address', () => {
     await waitFor(() => expect(result.current.email).toBe('anna@example.com'))
   })
 
+  it('shows the address on a fresh mount, as a tab switch produces', async () => {
+    // The bug this guards: a <Route element> unmounts on navigation, so a fresh
+    // hook is what the other tab renders. Seeded from '' the address vanished on
+    // every tab change and never returned, because ensure() only runs from
+    // connect() and the user is already connected by then. `connected` survives
+    // the same trip by deriving from the token; this has to derive from the
+    // resolver for the same reason.
+    const account = {
+      ensure: vi.fn(async () => 'anna@example.com'),
+      email: vi.fn(() => 'anna@example.com'),
+      forget: vi.fn(),
+    }
+    const { result } = renderHook(() => useDayMarker(deps({ account })))
+    expect(result.current.email).toBe('anna@example.com')
+    // Read from the cache, not re-fetched: the address is already known.
+    expect(account.ensure).not.toHaveBeenCalled()
+  })
+
   it('connects anyway when the address cannot be read', async () => {
     // The arm the optional-scope design rests on. `userinfo.email` is requested
     // but not verified, so a user who declines that one box gets a 403 here --

@@ -201,8 +201,17 @@ export function useDayMarker({
   }, [connected, options, milestones, todayDate, probeDelayMs, probeNonce])
 
   const [connecting, setConnecting] = useState(false)
-  /** '' when unknown: no scope, no resolver, or the lookup failed. */
-  const [email, setEmail] = useState('')
+  /**
+   * Seeded from the resolver, not from '' — the same rule `connected` follows one
+   * screen up. A `<Route element>` unmounts on navigation, so this hook's state
+   * does not survive a tab switch, but the `account` singleton above both pages
+   * still holds the address it already fetched. Starting empty made the address
+   * vanish on every tab change and then not come back, since `ensure()` is only
+   * called from `connect()` and the user is already connected.
+   *
+   * '' still means unknown: no scope, no resolver, or the lookup failed.
+   */
+  const [email, setEmail] = useState(() => account?.email() ?? '')
 
   /**
    * Returns whether a usable token was obtained. Callers need that answer:
