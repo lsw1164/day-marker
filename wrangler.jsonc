@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "day-marker",
+  "compatibility_date": "2026-08-15",
+  // No "main": this is an assets-only Worker. The app is a static bundle that
+  // talks to Google directly from the browser; there is no server runtime.
+  "assets": {
+    "directory": "./dist",
+    // Real routes (/, /registrations) must survive a hard refresh. Without this,
+    // /registrations 404s in production while working fine under `vite dev`.
+    "not_found_handling": "single-page-application"
+  }
+}

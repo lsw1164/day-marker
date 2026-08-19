@@ -82,6 +82,7 @@ Registrations, and you will need to remove them by hand.
 | `npm run test:watch` | Watch mode |
 | `npm run typecheck` | Types only |
 | `npm run build` | Production build to `dist/` |
+| `npm run deploy` | Build, then deploy to Cloudflare Workers |
 
 `npm test` and `npm run test:watch` pin `TZ=Asia/Seoul` deliberately. A
 local-midnight date bug produces the same (wrong) result under `TZ=UTC` and under
@@ -103,8 +104,9 @@ to expose it.
 ## Deploying
 
 `npm run build` produces a static `dist/` — plain files, no server runtime — and
-prints the current bundle sizes as it goes. Host it anywhere (Vercel, Netlify,
-Cloudflare Pages, GitHub Pages). Three required steps:
+prints the current bundle sizes as it goes. Cloudflare Workers is the configured
+target (see below); it will host equally well anywhere else (Vercel, Netlify,
+GitHub Pages). Three required steps, whatever the host:
 
 1. Set `VITE_GOOGLE_CLIENT_ID` in the host's build environment.
 2. Add the deployed origin to **Authorized JavaScript origins** on the OAuth client.
@@ -122,8 +124,33 @@ production**. Configure it:
 |---|---|
 | Vercel | `vercel.json` → `{ "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }] }` |
 | Netlify | `public/_redirects` → `/*  /index.html  200` |
+| Cloudflare Workers | `wrangler.jsonc` → `assets.not_found_handling: "single-page-application"` |
 | Cloudflare Pages | `public/_redirects` → `/*  /index.html  200` |
 | GitHub Pages | No rewrite support: copy `dist/index.html` to `dist/404.html` after building |
+
+### Cloudflare Workers
+
+`wrangler.jsonc` deploys `dist/` as an assets-only Worker — no `main`, because
+there is no server code to run. `not_found_handling` is what makes
+`/registrations` survive a hard refresh; Pages used to guess this from the
+presence of `index.html`, but Workers requires it to be stated.
+
+`public/_redirects` stays in the repo for the other hosts. Workers honours it
+too, and it is harmless here: a request matching a real asset is served before
+the redirect rules are consulted, so the catch-all only ever fires for routes.
+
+Deploys run from the GitHub repo via Cloudflare's build integration. Set
+`VITE_GOOGLE_CLIENT_ID` as a **build**-time variable in the Workers project —
+`.env` is gitignored, so the build has no other source for it, and a build
+without it produces a bundle whose sign-in silently fails. It is a Vite
+`VITE_`-prefixed variable, so it is inlined into the bundle and public by
+design; it is not a runtime secret.
+
+To deploy by hand instead: `npx wrangler login && npm run deploy`.
+
+`compatibility_date` is pinned to a date the installed `workerd` supports, so
+`npx wrangler dev` serves the built `dist/` exactly as production does. Bumping
+it past the local `workerd` build makes `wrangler dev` refuse to start.
 
 ### The app needs a secure context
 
