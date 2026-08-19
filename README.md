@@ -123,9 +123,9 @@ production**. Configure it:
 | Host | What to add |
 |---|---|
 | Vercel | `vercel.json` → `{ "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }] }` |
-| Netlify | `public/_redirects` → `/*  /index.html  200` |
+| Netlify | add `public/_redirects` → `/*  /index.html  200` (not in the repo — Workers rejects it) |
 | Cloudflare Workers | `wrangler.jsonc` → `assets.not_found_handling: "single-page-application"` |
-| Cloudflare Pages | `public/_redirects` → `/*  /index.html  200` |
+| Cloudflare Pages | same as Netlify |
 | GitHub Pages | No rewrite support: copy `dist/index.html` to `dist/404.html` after building |
 
 ### Cloudflare Workers
@@ -135,9 +135,12 @@ there is no server code to run. `not_found_handling` is what makes
 `/registrations` survive a hard refresh; Pages used to guess this from the
 presence of `index.html`, but Workers requires it to be stated.
 
-`public/_redirects` stays in the repo for the other hosts. Workers honours it
-too, and it is harmless here: a request matching a real asset is served before
-the redirect rules are consulted, so the catch-all only ever fires for routes.
+There is deliberately no `public/_redirects`. The catch-all that Netlify and
+Pages need (`/*  /index.html  200`) is *rejected* by the Workers deploy API —
+"Infinite loop detected in this rule", code 100324 — because it reads as a rule
+that strips `/index` and then re-matches itself. Note that `wrangler dev`
+accepts it and only the real deploy fails, so this cannot be caught locally.
+Add the file back if you move to a host that needs it.
 
 Deploys run from the GitHub repo via Cloudflare's build integration. Set
 `VITE_GOOGLE_CLIENT_ID` as a **build**-time variable in the Workers project —
