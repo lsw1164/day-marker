@@ -2,6 +2,10 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "day-marker",
   "compatibility_date": "2026-08-15",
+  // Workers Builds runs only the deploy command when the project's build command
+  // is left blank, so the build has to be declared here or `dist/` never exists.
+  "build": { "command": "npm run build" },
+
   // No "main": this is an assets-only Worker. The app is a static bundle that
   // talks to Google directly from the browser; there is no server runtime.
   "assets": {
