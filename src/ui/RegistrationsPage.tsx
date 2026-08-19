@@ -177,8 +177,11 @@ export function RegistrationsPage({
             ? 'empty'
             : 'loading'
 
+  // Same 5xl as the main screen, so the shared Header lines up with the content
+  // on both routes. Past about 1000px a two-up grid of cards starts reading as
+  // two unrelated columns instead of one collection.
   return (
-    <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 pb-10 pt-5">
+    <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 pb-10 pt-5 lg:max-w-5xl lg:gap-5">
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           {state.connected && listView === 'list'
@@ -293,7 +296,18 @@ export function RegistrationsPage({
           {/* tabIndex so the pendingListFocus effect above has somewhere to
               land a keyboard user after "Back to registrations" refreshes
               this list, rather than the document top. */}
-          <ul ref={listRef} tabIndex={-1} className="flex flex-col gap-2">
+          {/*
+            Two-up at lg, and the row being acted on spans both columns (see
+            RegistrationRow) so its full event list gets the width. Grid rather
+            than columns: the focus effect above reads `:scope > li`, which a
+            multi-column flow would keep intact but reorder unpredictably.
+            items-start stops a short card stretching to a tall neighbour.
+          */}
+          <ul
+            ref={listRef}
+            tabIndex={-1}
+            className="flex flex-col gap-2 lg:grid lg:grid-cols-2 lg:items-start lg:gap-3"
+          >
             {state.registrations.map((registration) => {
               const active = state.confirming === registration.startDate
               return (

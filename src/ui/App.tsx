@@ -64,8 +64,11 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
           ? `${COPY.milestoneCount(state.plan.length)} · ${COPY.selectedCount(state.counts.selected)}`
           : COPY.milestoneCount(state.milestones.length)
 
+  // pb-28 reserves room for the action bar, which is fixed to the viewport
+  // bottom on small screens; at lg the bar becomes static inside the left
+  // column, so that reservation drops away.
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-5 px-4 pb-28 pt-5">
+    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-5 px-4 pb-28 pt-5 lg:max-w-5xl lg:gap-6 lg:pb-10">
       {/* Identity and nav moved to the shared Header. The connection chip stays
           here because connecting is page-level. */}
       <div className="flex items-center justify-end gap-1">
@@ -121,68 +124,96 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
       )}
 
       {state.phase === 'done' ? (
-        <ResultSummary
-          results={state.results}
-          error={state.error}
-          onRetry={() => void state.retryFailed()}
-          onReset={state.reset}
-        />
-      ) : (
-        <>
-          <StartDateForm
-            startDate={state.startDate}
-            label={state.label}
-            years={state.years}
-            reminder={state.reminder}
-            onStartDate={state.setStartDate}
-            onLabel={state.setLabel}
-            onYears={state.setYears}
-            onReminder={state.setReminder}
-            disabled={state.phase === 'applying'}
+        // Capped rather than filling the whole container: the report is one column
+        // of prose and outcomes, and stretching it to 1100px would put the retry
+        // button a screen-width away from the failure it retries.
+        <div className="w-full lg:max-w-2xl">
+          <ResultSummary
+            results={state.results}
+            error={state.error}
+            onRetry={() => void state.retryFailed()}
+            onReset={state.reset}
           />
+        </div>
+      ) : (
+        /*
+          Two columns at lg: the controls on the left, and the milestones they
+          produce on the right. This screen is a cause and its consequence -- one
+          date becomes 13 to 46 dated events -- so the extra width goes on seeing
+          the consequence change as you change the cause, rather than on a wider
+          form. items-start keeps the left column its own height so it can stick.
+        */
+        <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[19rem_minmax(0,1fr)] lg:items-start lg:gap-10">
+          {/*
+            The cause. Sticky at lg so the controls and the button that commits
+            them stay put while a 46-row consequence scrolls past on the right;
+            top-10 matches the header's lg padding so it parks under it.
+          */}
+          <div className="flex flex-col gap-5 lg:sticky lg:top-10">
+            <StartDateForm
+              startDate={state.startDate}
+              label={state.label}
+              years={state.years}
+              reminder={state.reminder}
+              onStartDate={state.setStartDate}
+              onLabel={state.setLabel}
+              onYears={state.setYears}
+              onReminder={state.setReminder}
+              disabled={state.phase === 'applying'}
+            />
 
-          {rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{COPY.pickADate}</p>
-          ) : (
-            <>
-              {state.phase === 'applying' && (
-                // aria-label: the numeric context lives in the list heading, so
-                // without this a screen reader announces an unlabelled progressbar.
-                <Progress
-                  aria-label={COPY.applying}
-                  value={(state.results.length / Math.max(rows.length, 1)) * 100}
-                />
-              )}
-              <MilestoneList heading={heading} rows={rows} onToggle={state.toggle} />
-            </>
-          )}
-
-          <div className="fixed inset-x-0 bottom-0 border-t bg-background/95 px-4 py-3 backdrop-blur">
-            <div className="mx-auto max-w-md">
-              {state.connected ? (
-                <Button
-                  className="w-full min-h-11"
-                  disabled={busy || state.counts.selected === 0}
-                  onClick={() => void state.submit()}
-                >
-                  {state.phase === 'applying' ? COPY.applying : actionLabel(state.counts)}
-                </Button>
-              ) : (
-                <Button
-                  className="w-full min-h-11"
-                  variant="outline"
-                  // Only an affirmative `true` enables it: while readiness is
-                  // still unknown a click would reach GIS before the script has
-                  // loaded and surface an internal message.
-                  disabled={gisReady !== true}
-                  onClick={() => void state.connect()}
-                >
-                  {COPY.connect}
-                </Button>
-              )}
+            {/*
+              Fixed to the viewport on small screens, where a thumb-reachable bar
+              is the right idiom; static under the form at lg, where that idiom
+              stops making sense -- on a desktop the button belongs next to the
+              controls it commits, not pinned a screen-height below them.
+            */}
+            <div className="fixed inset-x-0 bottom-0 border-t bg-background/95 px-4 py-3 backdrop-blur lg:static lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none">
+              <div className="mx-auto max-w-md lg:max-w-none">
+                {state.connected ? (
+                  <Button
+                    className="w-full min-h-11"
+                    disabled={busy || state.counts.selected === 0}
+                    onClick={() => void state.submit()}
+                  >
+                    {state.phase === 'applying' ? COPY.applying : actionLabel(state.counts)}
+                  </Button>
+                ) : (
+                  <Button
+                    className="w-full min-h-11"
+                    variant="outline"
+                    // Only an affirmative `true` enables it: while readiness is
+                    // still unknown a click would reach GIS before the script has
+                    // loaded and surface an internal message.
+                    disabled={gisReady !== true}
+                    onClick={() => void state.connect()}
+                  >
+                    {COPY.connect}
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
-        </>
+
+          {/* The consequence. */}
+          <div className="flex flex-col gap-5">
+            {rows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{COPY.pickADate}</p>
+            ) : (
+              <>
+                {state.phase === 'applying' && (
+                  // aria-label: the numeric context lives in the list heading, so
+                  // without this a screen reader announces an unlabelled progressbar.
+                  <Progress
+                    aria-label={COPY.applying}
+                    value={(state.results.length / Math.max(rows.length, 1)) * 100}
+                  />
+                )}
+                <MilestoneList heading={heading} rows={rows} onToggle={state.toggle} />
+              </>
+            )}
+          </div>
+        </div>
       )}
     </main>
   )

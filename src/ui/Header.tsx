@@ -16,11 +16,16 @@ const ICON: Record<ThemeChoice, typeof Monitor> = {
 
 export function Header() {
   return (
-    <header className="mx-auto w-full max-w-md px-4 pt-6">
+    <header className="mx-auto w-full max-w-md px-4 pt-6 lg:max-w-5xl lg:pt-10">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold">{COPY.appName}</h1>
-          <p className="text-xs text-muted-foreground">{COPY.tagline}</p>
+          {/*
+            The type scale steps at lg rather than the container merely getting
+            wider. At that width an 18px title reads as a caption stranded at the top of
+            a large page, so it takes some of the extra width as presence.
+          */}
+          <h1 className="text-lg font-semibold tracking-tight lg:text-2xl">{COPY.appName}</h1>
+          <p className="text-xs text-muted-foreground lg:text-sm">{COPY.tagline}</p>
         </div>
         <ThemeToggle />
       </div>
@@ -29,7 +34,12 @@ export function Header() {
         sticky primary button, so a second bottom bar would consume roughly 120px
         of a small screen and push that button away from the thumb.
       */}
-      <nav aria-label={COPY.navLabel} className="mt-3 flex gap-1">
+      {/*
+        Capped at lg: the tabs are `flex-1`, so across the full header each one
+        would stretch past 500px -- a segmented control reads as a control only
+        while it stays the size of the choice it offers.
+      */}
+      <nav aria-label={COPY.navLabel} className="mt-3 flex gap-1 lg:max-w-xs">
         <NavLink
           to="/"
           end

@@ -55,6 +55,11 @@ export function RegistrationRow({
       className={cn(
         'rounded-xl border p-3',
         open ? 'border-destructive/40' : 'border-border',
+        // Spans both columns of the page's lg grid while open: this is the state
+        // that lists every event, and a confirm screen that asks the user to
+        // check what they are about to lose should not be the narrower half of
+        // the layout. Inert on small screens, where the list is one column.
+        open && 'lg:col-span-2',
       )}
     >
       <p className="font-medium">{registration.title}</p>
