@@ -34,7 +34,7 @@ describe('ResultSummary — success', () => {
     render(<ResultSummary results={results} onRetry={() => {}} onReset={() => {}} />)
     expect(screen.getByRole('link', { name: /View in Calendar/ })).toHaveAttribute(
       'href',
-      'https://calendar.google.com/calendar/r/day/2026/4/10',
+      'https://calendar.google.com/calendar/u/0/r/month/2026/4/10',
     )
   })
 

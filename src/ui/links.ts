@@ -1,7 +1,21 @@
 import type { CalendarDate } from '@/domain/calendarDate'
 
-/** Google Calendar's day view wants unpadded numbers: /r/day/2026/4/10. */
-export function calendarDayUrl(date: CalendarDate): string {
+/**
+ * Google Calendar's month view, scrolled to the milestone's own date:
+ * /u/0/r/month/2026/11/24. Month rather than day because an anniversary is
+ * one all-day entry -- the day view shows it alone against an empty grid,
+ * while the month view shows it in the run of dates around it.
+ *
+ * Unpadded numbers: the route rejects /2026/04/10.
+ *
+ * The /u/0/ segment pins the FIRST signed-in Google account. That is right for
+ * the common single-account case and wrong for a user whose Day Marker calendar
+ * lives under their second account, who will land on the wrong calendar and not
+ * find the event. We cannot do better from here: the token carries no account
+ * index, and asking for one would mean requesting a profile scope purely to
+ * build a link.
+ */
+export function calendarMonthUrl(date: CalendarDate): string {
   const [y, m, d] = date.split('-').map(Number)
-  return `https://calendar.google.com/calendar/r/day/${y}/${m}/${d}`
+  return `https://calendar.google.com/calendar/u/0/r/month/${y}/${m}/${d}`
 }

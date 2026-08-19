@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { formatLong } from '@/domain/calendarDate'
 import type { ItemResult } from '@/google/apply'
 import { COPY, outcomeLabel } from '@/ui/copy'
-import { calendarDayUrl } from '@/ui/links'
+import { calendarMonthUrl } from '@/ui/links'
 
 const PREVIEW_ROWS = 4
 
@@ -89,7 +89,7 @@ export function ResultSummary({ results, error, onRetry, onReset }: ResultSummar
               // base-ui composes via a `render` element instead.
               <Button
                 className="flex-1 min-h-11"
-                render={<a href={calendarDayUrl(first)} target="_blank" rel="noreferrer" />}
+                render={<a href={calendarMonthUrl(first)} target="_blank" rel="noreferrer" />}
               >
                 {COPY.viewInCalendar}
               </Button>
