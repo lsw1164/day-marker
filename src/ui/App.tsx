@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { ConnectionStatus } from '@/ui/ConnectionStatus'
 import { Progress } from '@/components/ui/progress'
 import { whenGisReady } from '@/google/auth'
+import { cn } from '@/lib/utils'
 import { actionLabel, COPY } from '@/ui/copy'
+import { detectInAppBrowser } from '@/ui/inAppBrowser'
+import { InAppBrowserNotice } from '@/ui/InAppBrowserNotice'
 import { MilestoneList } from '@/ui/MilestoneList'
 import { ResultSummary } from '@/ui/ResultSummary'
 import { buildRows } from '@/ui/rows'
@@ -16,9 +19,15 @@ export interface AppProps {
   deps: DayMarkerDeps
   /** Injectable because window.google never exists under jsdom. */
   checkGisReady?: () => Promise<boolean>
+  /** Injectable for the same reason: jsdom reports itself as jsdom. */
+  userAgent?: string
 }
 
-export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
+export function App({
+  deps,
+  checkGisReady = whenGisReady,
+  userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent,
+}: AppProps) {
   const state = useDayMarker(deps)
   /**
    * Tri-state, not a boolean. `whenGisReady` polls for up to ten seconds, and a
@@ -29,6 +38,12 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
    * Connect stays disabled until the answer arrives.
    */
   const [gisReady, setGisReady] = useState<boolean | null>(null)
+  /**
+   * The webview we are trapped in, or null in a real browser. Computed once:
+   * the user agent cannot change without a reload, and re-deriving it per render
+   * would be work in service of an answer that is already fixed.
+   */
+  const inApp = useMemo(() => detectInAppBrowser(userAgent), [userAgent])
 
   useEffect(() => {
     let live = true
@@ -52,6 +67,14 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
   // `reprobePending` covers the debounce window before `probing` begins. The plan
   // on screen is deliberately still visible there, but it no longer matches the
   // inputs, so submitting it would write the wrong thing — or skip a rename.
+  /**
+   * Gated on `!connected` as well as on the webview: only the OAuth handshake is
+   * blocked in here, so a session established in a real browser -- or one that
+   * survived a reload -- keeps working, and telling that user they cannot sign
+   * in would be false as well as useless.
+   */
+  const showInAppNotice = state.connected ? null : inApp
+
   const busy =
     state.phase === 'applying' || state.phase === 'probing' || state.reprobePending
   // A narrower slice of `busy`: the two phases where the list on screen no longer
@@ -73,7 +96,14 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
   // bottom on small screens; at lg the bar becomes static inside the left
   // column, so that reservation drops away.
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-5 px-4 pb-28 pt-5 lg:max-w-5xl lg:gap-6 lg:pb-10">
+    <main
+      className={cn(
+        'mx-auto flex min-h-dvh w-full max-w-md flex-col gap-5 px-4 pt-5 lg:max-w-5xl lg:gap-6 lg:pb-10',
+        // The reservation exists for the action bar; with the bar hidden it is
+        // 7rem of dead space at the bottom of a phone screen.
+        showInAppNotice === null ? 'pb-28' : 'pb-10',
+      )}
+    >
       {/* Identity and nav live in the shared Header; this stays page-level --
           see ConnectionStatus for why it cannot move up there. */}
       <div className="flex justify-end">
@@ -95,7 +125,24 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
         This comment belongs here, in children position. A JSX comment placed
         inside one of the parenthesised && expressions below is a syntax error.
       */}
-      {gisReady === false && (
+      {/*
+        Stands in for the Connect button rather than warning beside it: Google
+        refuses OAuth inside an embedded webview, so that button leads only to
+        Google's own "this browser or app may not be secure" page, which reads
+        as Day Marker being broken. It lives up here with the other page-level
+        alerts because it is four lines tall -- inside the action bar, which is
+        fixed to the bottom of a phone screen, it would cover the milestones.
+      */}
+      {showInAppNotice && (
+        <InAppBrowserNotice kind={showInAppNotice} userAgent={userAgent} />
+      )}
+
+      {/*
+        Suppressed while the in-app notice is up: this one says to check the
+        network and reload, which is the wrong instruction sitting next to the
+        right one, with nothing to tell the user which is which.
+      */}
+      {gisReady === false && showInAppNotice === null && (
         <Alert variant="destructive">
           <AlertDescription>{COPY.scriptBlocked}</AlertDescription>
         </Alert>
@@ -160,7 +207,15 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
               stops making sense -- on a desktop the button belongs next to the
               controls it commits, not pinned a screen-height below them.
             */}
-            <div className="fixed inset-x-0 bottom-0 border-t bg-background/95 px-4 py-3 backdrop-blur lg:static lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none">
+            <div
+              className="fixed inset-x-0 bottom-0 border-t bg-background/95 px-4 py-3 backdrop-blur lg:static lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none"
+              /*
+                Hidden, not disabled, while the in-app notice stands in for it:
+                Connect has no working outcome in a webview, and a bar that is
+                only ever empty would still eat 5rem of a phone screen.
+              */
+              hidden={showInAppNotice !== null}
+            >
               <div className="mx-auto max-w-md lg:max-w-none">
                 {state.connected ? (
                   <Button

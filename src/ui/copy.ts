@@ -1,6 +1,7 @@
 import type { ReminderPreset } from '@/domain/reminders'
 import type { ItemOutcome } from '@/google/apply'
 import type { PlanItem, PlanStatus } from '@/google/plan'
+import type { InAppBrowser } from '@/ui/inAppBrowser'
 import type { ThemeChoice } from '@/ui/useTheme'
 
 export const COPY = {
@@ -124,6 +125,38 @@ export const COPY = {
   popupBlocked: 'Your browser blocked the Google window. Allow popups for this site and try again.',
   missingClientId:
     'VITE_GOOGLE_CLIENT_ID is not set. Copy .env.local.example to .env.local and add your client ID.',
+
+  // The in-app browser wall. Google refuses OAuth inside an embedded webview,
+  // so there is no version of "try again" that helps here -- every string below
+  // exists to move the user to a real browser instead.
+  inAppTitle: 'Google sign-in is blocked here',
+  /**
+   * Written for mid-sentence use, which is why 'other' is lower case: the app
+   * we could not name still has to read as English inside the two sentences
+   * below rather than as a heading dropped into them.
+   */
+  inAppNames: {
+    kakaotalk: 'KakaoTalk',
+    naver: 'Naver',
+    line: 'LINE',
+    instagram: 'Instagram',
+    facebook: 'Facebook',
+    other: 'this app',
+  } satisfies Record<InAppBrowser, string>,
+  // Names the app rather than saying "your browser": the user did not choose
+  // this browser and may not know they are in one, so naming it is what makes
+  // the instruction underneath followable.
+  inAppBody: (name: string) =>
+    `Google does not allow sign-in inside ${name}'s browser. Open Day Marker in Chrome or Safari and connect there.`,
+  inAppOpen: 'Open in your browser',
+  inAppCopy: 'Copy link',
+  // A copy leaves no visible trace, so the control has to report itself.
+  inAppCopied: 'Link copied',
+  // Shown whether or not an escape link exists. The schemes that do exist can
+  // fail silently -- the app simply ignores the URL -- and a user left with a
+  // button that did nothing needs somewhere else to go.
+  inAppManual: (name: string) =>
+    `Or open ${name}'s menu and choose the option that opens this page in another browser.`,
 } as const
 
 export interface PlanCounts {

@@ -351,3 +351,47 @@ describe('App — successful retry', () => {
     expect(screen.queryByRole('button', { name: /Reconnect and finish/ })).not.toBeInTheDocument()
   })
 })
+
+describe('App — in-app browser', () => {
+  const KAKAO =
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 KAKAOTALK 10.4.0'
+  const SAFARI =
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
+
+  it('replaces Connect with a way out, since Google refuses sign-in in a webview', async () => {
+    // Not a warning beside the button: a Connect here reaches only Google's
+    // "this browser or app may not be secure" page, which reads as the app
+    // being broken.
+    render(<App deps={deps()} checkGisReady={gisReady} userAgent={KAKAO} />)
+    expect(await screen.findByText(COPY.inAppBody('KakaoTalk'))).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Connect Google account/ })).not.toBeInTheDocument()
+  })
+
+  it('leaves a real browser alone', async () => {
+    render(<App deps={deps()} checkGisReady={gisReady} userAgent={SAFARI} />)
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Connect Google account/ })).toBeEnabled(),
+    )
+    expect(screen.queryByText(COPY.inAppTitle)).not.toBeInTheDocument()
+  })
+
+  it('does not also blame the network, which is contradictory advice', async () => {
+    // scriptBlocked tells the user to check their blocker and reload. In a
+    // webview that is a wrong instruction sitting next to a right one, and the
+    // user has no way to tell which is which.
+    render(<App deps={deps()} checkGisReady={async () => false} userAgent={KAKAO} />)
+    expect(await screen.findByText(COPY.inAppTitle)).toBeInTheDocument()
+    expect(screen.queryByText(COPY.scriptBlocked)).not.toBeInTheDocument()
+  })
+
+  it('keeps a live session working, because only the handshake is blocked', async () => {
+    // A user who escaped, connected, and came back -- or whose grant survived a
+    // reload. The Calendar API itself works fine inside a webview, so hiding the
+    // app here would take away something that works.
+    const d = deps({ auth: { connect: vi.fn(async () => 'tok'), token: () => 'tok', clear: vi.fn() } })
+    render(<App deps={d} checkGisReady={gisReady} userAgent={KAKAO} />)
+    enterStartDate('2026-01-01')
+    expect(await screen.findByRole('button', { name: 'Add 12' })).toBeInTheDocument()
+    expect(screen.queryByText(COPY.inAppTitle)).not.toBeInTheDocument()
+  })
+})

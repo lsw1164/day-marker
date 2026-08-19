@@ -161,6 +161,23 @@ it past the local `workerd` build makes `wrangler dev` refuse to start.
 On plain HTTP, event-ID generation fails — the app dies at the first milestone
 with "Cannot read properties of undefined (reading 'digest')".
 
+### Sign-in cannot work in an in-app browser
+
+Google rejects OAuth from embedded webviews — KakaoTalk, Naver, LINE, Instagram,
+Facebook — with `disallowed_useragent`, showing its own "this browser or app may
+not be secure" page instead of a consent screen. The block is on the user agent,
+not on the popup, so nothing in this app's OAuth configuration can lift it: a
+redirect flow fails identically.
+
+`src/ui/inAppBrowser.ts` detects those webviews and, where the host app
+publishes one, produces a URL that leaves them — `kakaotalk://web/openExternal`,
+LINE's `?openExternalBrowser=1`, or an Android `intent://` URL naming Chrome.
+iOS outside KakaoTalk and LINE has no such route, so the notice falls back to
+the clipboard and to telling the user where the app's menu is. Both pages swap
+their Connect control for `InAppBrowserNotice` while disconnected in a webview;
+a session established in a real browser keeps working there, since only the
+handshake is blocked and the Calendar API itself is not.
+
 ## Design docs
 
 - Design: `docs/superpowers/specs/2026-08-17-day-marker-design.md`

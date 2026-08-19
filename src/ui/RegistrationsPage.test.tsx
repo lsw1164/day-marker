@@ -379,3 +379,36 @@ describe('RegistrationsPage — signing out', () => {
     )
   })
 })
+
+describe('RegistrationsPage — in-app browser', () => {
+  const KAKAO =
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 KAKAOTALK 10.4.0'
+  const SAFARI =
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
+
+  it('replaces Connect with a way out, as the main screen does', async () => {
+    // The same wall, reached through the other door. A user who lands here
+    // first must not be left clicking a Connect that cannot work.
+    render(
+      <RegistrationsPage deps={deps([], null)} checkGisReady={ready} userAgent={KAKAO} />,
+    )
+    expect(await screen.findByText(COPY.inAppBody('KakaoTalk'))).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: COPY.connect })).not.toBeInTheDocument()
+  })
+
+  it('leaves a real browser alone', async () => {
+    render(
+      <RegistrationsPage deps={deps([], null)} checkGisReady={ready} userAgent={SAFARI} />,
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: COPY.connect })).toBeEnabled(),
+    )
+    expect(screen.queryByText(COPY.inAppTitle)).not.toBeInTheDocument()
+  })
+
+  it('still lists a live session, because only the handshake is blocked', async () => {
+    render(<RegistrationsPage deps={deps(REG_A)} checkGisReady={ready} userAgent={KAKAO} />)
+    expect(await screen.findByText('1 registration')).toBeInTheDocument()
+    expect(screen.queryByText(COPY.inAppTitle)).not.toBeInTheDocument()
+  })
+})

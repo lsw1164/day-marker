@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { today as todayFn, type CalendarDate } from '@/domain/calendarDate'
 import { whenGisReady } from '@/google/auth'
 import { ConnectionStatus } from '@/ui/ConnectionStatus'
 import { COPY } from '@/ui/copy'
+import { detectInAppBrowser } from '@/ui/inAppBrowser'
+import { InAppBrowserNotice } from '@/ui/InAppBrowserNotice'
 import { RegistrationRow } from '@/ui/RegistrationRow'
 import type { DayMarkerDeps } from '@/ui/useDayMarker'
 import { useRegistrations } from '@/ui/useRegistrations'
@@ -14,6 +16,8 @@ export interface RegistrationsPageProps {
   /** Injectable because window.google never exists under jsdom. */
   checkGisReady?: () => Promise<boolean>
   todayDate?: CalendarDate
+  /** Injectable because jsdom reports itself as jsdom. See App.tsx. */
+  userAgent?: string
 }
 
 type ListView = 'loading' | 'empty' | 'list' | 'blocked'
@@ -22,6 +26,7 @@ export function RegistrationsPage({
   deps,
   checkGisReady = whenGisReady,
   todayDate = todayFn(),
+  userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent,
 }: RegistrationsPageProps) {
   // Passed straight through rather than rebuilt into a fresh `{ auth, api,
   // retryDeps }` literal here: useRegistrations reads auth/api through refs
@@ -32,6 +37,8 @@ export function RegistrationsPage({
   // ignored by its destructuring.
   const state = useRegistrations(deps)
   const [gisReady, setGisReady] = useState<boolean | null>(null)
+  /** The webview we are trapped in, or null in a real browser. See App.tsx. */
+  const inApp = useMemo(() => detectInAppBrowser(userAgent), [userAgent])
   const listRef = useRef<HTMLUListElement>(null)
   const emptyRef = useRef<HTMLParagraphElement>(null)
   const retryRef = useRef<HTMLButtonElement>(null)
@@ -224,7 +231,8 @@ export function RegistrationsPage({
         above -- getByRole('alert') throws on more than one match, and several
         tests depend on there being exactly one.
       */}
-      {!state.connected && gisReady === false && !showPageError && (
+      {/* Suppressed inside a webview for the reason App.tsx gives. */}
+      {!state.connected && gisReady === false && !showPageError && !inApp && (
         <Alert variant="destructive">
           <AlertDescription>{COPY.scriptBlocked}</AlertDescription>
         </Alert>
@@ -255,7 +263,16 @@ export function RegistrationsPage({
         </Button>
       )}
 
-      {!state.connected ? (
+      {inApp && !state.connected ? (
+        /*
+          Stands in for the connect prompt, exactly as on the main screen and
+          for the same reason: Google refuses OAuth inside an embedded webview,
+          so a Connect here leads only to its "this browser or app may not be
+          secure" page. Gated on `!connected` too -- only the handshake is
+          blocked, so a session established elsewhere still lists fine in here.
+        */
+        <InAppBrowserNotice kind={inApp} userAgent={userAgent} />
+      ) : !state.connected ? (
         <>
           <p className="text-sm text-muted-foreground">{COPY.registrationsConnectPrompt}</p>
           <Button
