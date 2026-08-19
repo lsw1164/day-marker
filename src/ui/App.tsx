@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { ConnectionStatus } from '@/ui/ConnectionStatus'
 import { Progress } from '@/components/ui/progress'
 import { whenGisReady } from '@/google/auth'
 import { actionLabel, COPY } from '@/ui/copy'
@@ -73,33 +74,18 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
   // column, so that reservation drops away.
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-5 px-4 pb-28 pt-5 lg:max-w-5xl lg:gap-6 lg:pb-10">
-      {/* Identity and nav moved to the shared Header. The connection chip stays
-          here because connecting is page-level. */}
-      <div className="flex items-center justify-end gap-1">
-        <span className="text-xs text-muted-foreground">
-          {state.connected ? COPY.connected : COPY.notConnected}
-        </span>
-        {/*
-          Beside the chip rather than in the shared Header: `connected` is state
-          inside this page's hook, with no subscription to the auth singleton, so
-          a Header control could clear the token without either page hearing
-          about it. Both routes carry their own, and only one is ever mounted.
-
-          Hidden — not disabled — during a write: clearing the token mid-run
-          fails every event still queued, so the user would read a report full of
-          errors they did not cause. A disabled button would still advertise an
-          action that is wrong at that moment.
-        */}
-        {state.connected && state.phase !== 'applying' && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-xs text-muted-foreground"
-            onClick={state.signOut}
-          >
-            {COPY.signOut}
-          </Button>
-        )}
+      {/* Identity and nav live in the shared Header; this stays page-level --
+          see ConnectionStatus for why it cannot move up there. */}
+      <div className="flex justify-end">
+        <ConnectionStatus
+          connected={state.connected}
+          // Hidden -- not disabled -- during a write: clearing the token mid-run
+          // fails every event still queued, so the user would read a report full
+          // of errors they did not cause. A disabled button would still advertise
+          // an action that is wrong at that moment.
+          canSignOut={state.phase !== 'applying'}
+          onSignOut={state.signOut}
+        />
       </div>
 
       {/*
