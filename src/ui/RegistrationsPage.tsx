@@ -276,14 +276,37 @@ export function RegistrationsPage({
             ref={connectRef}
             variant="outline"
             className="min-h-11"
-            disabled={gisReady !== true}
+            disabled={gisReady !== true || state.connecting}
             onClick={() => void state.connect()}
           >
-            {COPY.connect}
+            {/* Same two silent waits as the main screen; see App.tsx. */}
+            {state.connecting
+              ? COPY.connecting
+              : gisReady === null
+                ? COPY.loadingGoogle
+                : COPY.connect}
           </Button>
         </>
       ) : listView === 'loading' ? (
-        <p className="text-sm text-muted-foreground">{COPY.registrationsLoading}</p>
+        <>
+          <p className="text-sm text-muted-foreground">{COPY.registrationsLoading}</p>
+          {/*
+            Placeholders in the shape of the cards that are coming, so the wait
+            reads as a list filling in rather than one line of text on an empty
+            page. aria-hidden because the sentence above already says this to a
+            screen reader, and three shapes announced as blank list items would
+            only add noise. motion-safe so a reduced-motion preference gets the
+            layout without the pulse.
+          */}
+          <div aria-hidden="true" className="flex flex-col gap-2 lg:grid lg:grid-cols-2 lg:gap-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="rounded-xl border p-3">
+                <div className="h-4 w-40 rounded bg-muted motion-safe:animate-pulse" />
+                <div className="mt-2 h-3 w-28 rounded bg-muted motion-safe:animate-pulse" />
+              </div>
+            ))}
+          </div>
+        </>
       ) : listView === 'empty' ? (
         // tabIndex so a keyboard user landing here after "Back to
         // registrations" refreshes into an empty list has somewhere to land

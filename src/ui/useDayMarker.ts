@@ -187,6 +187,8 @@ export function useDayMarker({
     // api and auth are intentionally absent — see the apiRef/authRef note above.
   }, [connected, options, milestones, todayDate, probeDelayMs, probeNonce])
 
+  const [connecting, setConnecting] = useState(false)
+
   /**
    * Returns whether a usable token was obtained. Callers need that answer:
    * `retryFailed` must not write with a dead token, and it cannot read the
@@ -199,6 +201,11 @@ export function useDayMarker({
       // sign-out left pending", which is how the chooser reaches the button in
       // App.tsx without that button knowing anything about sign-out.
       const chosen = prompt ?? nextPrompt.current
+      // Set before the first await, so a caller that renders off this flag shows
+      // the busy state in the same commit as the click rather than a frame later.
+      // Reading nextPrompt above is synchronous, and nothing is awaited between
+      // here and requestAccessToken, so the popup still opens inside the gesture.
+      setConnecting(true)
       try {
         // Called before any await so the popup survives the user gesture. It stays
         // inside the try and is always awaited, so a handler is attached — clear()
@@ -229,6 +236,11 @@ export function useDayMarker({
         setError(describe(e))
         setConnected(false)
         return false
+      } finally {
+        // finally, not per-branch: two of the catch arms return early on
+        // sentinels, and a flag left set on either would strand the button in
+        // "Connecting…" with no way back.
+        setConnecting(false)
       }
     },
     [],
@@ -354,6 +366,7 @@ export function useDayMarker({
     plan,
     results,
     connected,
+    connecting,
     error,
     counts,
     failedCount,

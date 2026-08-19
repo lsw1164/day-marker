@@ -142,6 +142,26 @@ describe('RegistrationRow — deleting and done', () => {
     expect(screen.getByRole('button', { name: COPY.deleteBusy })).toBeDisabled()
   })
 
+  it('shows overall progress while deleting, not only per-event badges', () => {
+    // On a long registration the per-event badges land far down a scrolling
+    // list, so from the top of the card a run in progress could look stalled.
+    renderRow({
+      state: 'deleting',
+      results: [{ event: REG.events[0]!, outcome: 'deleted' }],
+    })
+    expect(screen.getByRole('progressbar', { name: COPY.deleteBusy })).toBeInTheDocument()
+  })
+
+  it('shows no progress bar once the run is over', () => {
+    // The other arm: a bar left on screen in 'done' would read as still working
+    // while the summary underneath says it finished.
+    renderRow({
+      state: 'done',
+      results: [{ event: REG.events[0]!, outcome: 'deleted' }],
+    })
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
+
   it('shows progress as results land, before the run is done', () => {
     // Task 8 streams results through onProgress, so a partly-finished delete has
     // to render what has already landed -- it is the user's only feedback during

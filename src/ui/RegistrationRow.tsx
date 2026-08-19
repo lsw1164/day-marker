@@ -1,6 +1,7 @@
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
 import { formatLong, type CalendarDate } from '@/domain/calendarDate'
 import {
   DELETE_HALTED,
@@ -126,6 +127,22 @@ export function RegistrationRow({
               )
             })}
           </ul>
+
+          {/*
+            The same aggregate cue the write path already gives during `applying`.
+            Per-event badges do stream in as results land, but on a long
+            registration they arrive far down a scrolling list, so a run in
+            progress could look stalled from the top of the card. aria-label
+            because the count lives in the badges rather than beside the bar,
+            and an unlabelled progressbar announces nothing.
+          */}
+          {state === 'deleting' && (
+            <Progress
+              className="mt-3"
+              aria-label={COPY.deleteBusy}
+              value={(results.length / Math.max(registration.count, 1)) * 100}
+            />
+          )}
 
           {state === 'done' ? (
             <>

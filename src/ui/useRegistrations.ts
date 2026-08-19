@@ -144,7 +144,13 @@ export function useRegistrations({ auth, api, calendar, retryDeps }: Registratio
     // api and auth are intentionally absent -- see the apiRef/authRef note above.
   }, [connected, loadNonce])
 
+  const [connecting, setConnecting] = useState(false)
+
   const connect = useCallback(async (): Promise<boolean> => {
+    // Before the first await, so a caller renders the busy state in the same
+    // commit as the click. Nothing is awaited ahead of requestAccessToken, so
+    // the popup still opens inside the user gesture.
+    setConnecting(true)
     try {
       // Evaluated before any await so the popup survives the user gesture, and
       // awaited inside the try so a handler is always attached.
@@ -167,6 +173,10 @@ export function useRegistrations({ auth, api, calendar, retryDeps }: Registratio
       setError(describeError(e))
       setConnected(false)
       return false
+    } finally {
+      // finally, not per-branch: two catch arms return early on sentinels, and
+      // a flag left set on either would strand the button in "Connecting…".
+      setConnecting(false)
     }
   }, [])
 
@@ -335,6 +345,7 @@ export function useRegistrations({ auth, api, calendar, retryDeps }: Registratio
   return {
     phase,
     connected,
+    connecting,
     registrations,
     confirming,
     results,

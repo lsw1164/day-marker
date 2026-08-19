@@ -62,6 +62,14 @@ export const COPY = {
   connected: 'Connected',
   connect: 'Connect Google account',
   signOut: 'Sign out',
+  // Two distinct waits, so two strings. `loadingGoogle` covers the window
+  // before we know whether Google's script arrived at all -- up to ten seconds
+  // on a blocked network, during which Connect is disabled and would otherwise
+  // sit there looking broken. `connecting` covers the work after the popup
+  // closes: the token exchange and the ensure() round trip that finds or
+  // creates the app's calendar, which is silent network time either way.
+  loadingGoogle: 'Loading Google…',
+  connecting: 'Connecting…',
 
   startDate: 'Start date',
   labelField: 'Label — optional',

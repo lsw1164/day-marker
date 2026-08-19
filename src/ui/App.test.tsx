@@ -2,13 +2,13 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { App } from '@/ui/App'
+import { COPY } from '@/ui/copy'
 import type { DayMarkerDeps } from '@/ui/useDayMarker'
 import type { Auth } from '@/google/auth'
 import type { AppCalendar } from '@/google/appCalendar'
 import type { CalendarApi } from '@/google/calendarApi'
 import type { GoogleEventPayload } from '@/domain/eventPayload'
 import { calendarDate } from '@/domain/calendarDate'
-import { COPY } from '@/ui/copy'
 
 function stubCalendar(): AppCalendar {
   return { ensure: vi.fn(async () => 'cal-1'), id: vi.fn(() => 'cal-1'), forget: vi.fn() }
@@ -109,9 +109,14 @@ describe('App — connected', () => {
     // The badges stay on screen while the re-probe is pending — that part of the
     // preview behaviour is what moving `probing` into the debounce bought.
     expect(screen.getAllByText('New').length).toBeGreaterThan(0)
+    // ...but they are marked stale rather than presented as a settled answer:
+    // every badge is about to be recomputed against the edited Label.
+    expect(screen.getByRole('list')).toHaveAttribute('aria-busy', 'true')
 
-    // ...and the button comes back once the fresh plan lands.
+    // ...and the button comes back once the fresh plan lands, with the list no
+    // longer flagged busy.
     await waitFor(() => expect(screen.getByRole('button', { name: 'Add 12' })).toBeEnabled())
+    expect(screen.getByRole('list')).toHaveAttribute('aria-busy', 'false')
   })
 
   it('writes the selected milestones and shows the result', async () => {
@@ -212,7 +217,9 @@ describe('App — errors', () => {
       />,
     )
 
-    await userEvent.click(screen.getByRole('button', { name: /Connect Google account/ }))
+    // Named for the pending wait: this click lands before readiness answers,
+    // which is the whole point -- it must not reach GIS.
+    await userEvent.click(screen.getByRole('button', { name: COPY.loadingGoogle }))
     expect(d.auth.connect).not.toHaveBeenCalled()
 
     answer(false)
@@ -222,12 +229,40 @@ describe('App — errors', () => {
     expect(alert).not.toHaveTextContent('has not loaded')
   })
 
-  it('keeps Connect disabled until the readiness check answers', () => {
+  it('keeps Connect disabled until the readiness check answers, and says why', async () => {
     // A never-resolving check stands in for the ten-second poll. Enabling the
     // button here would send the user straight into an internal error message.
     render(<App deps={deps()} checkGisReady={() => new Promise<boolean>(() => {})} />)
-    expect(screen.getByRole('button', { name: /Connect Google account/ })).toBeDisabled()
+    // Named for the wait, not the action: ten seconds of a disabled button
+    // labelled "Connect Google account" reads as broken rather than as busy.
+    const button = screen.getByRole('button', { name: COPY.loadingGoogle })
+    expect(button).toBeDisabled()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    // And it is genuinely the same control, not a separate placeholder that
+    // would leave two buttons once readiness answers.
+    expect(screen.queryByRole('button', { name: /Connect Google account/ })).not.toBeInTheDocument()
+  })
+
+  it('offers Connect by name once readiness answers', async () => {
+    await renderReady(deps())
+    expect(await screen.findByRole('button', { name: /Connect Google account/ })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: COPY.loadingGoogle })).not.toBeInTheDocument()
+  })
+
+  it('names the wait after the popup closes, while ensure() is still running', async () => {
+    // connect() awaits the token exchange and then ensure(), which finds or
+    // creates the app's calendar. That second round trip is silent network time,
+    // so the label has to survive past the popup rather than only during it.
+    const d = deps()
+    let release: (() => void) | undefined
+    ;(d.auth.connect as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise<void>((resolve) => (release = resolve)),
+    )
+    await renderReady(d)
+    await userEvent.click(screen.getByRole('button', { name: /Connect Google account/ }))
+    const busy = await screen.findByRole('button', { name: COPY.connecting })
+    expect(busy).toBeDisabled()
+    release?.()
   })
 
   it('never shows two alerts when a retry reconnect fails', async () => {

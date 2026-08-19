@@ -53,6 +53,10 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
   // inputs, so submitting it would write the wrong thing — or skip a rename.
   const busy =
     state.phase === 'applying' || state.phase === 'probing' || state.reprobePending
+  // A narrower slice of `busy`: the two phases where the list on screen no longer
+  // describes the inputs. `applying` is excluded because its rows are the live
+  // result of the run, not a stale answer waiting to be replaced.
+  const checkingCalendar = state.phase === 'probing' || state.reprobePending
   const heading =
     state.phase === 'applying'
       ? // During a write the list shows only the selected subset, so a total
@@ -185,10 +189,20 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
                     // Only an affirmative `true` enables it: while readiness is
                     // still unknown a click would reach GIS before the script has
                     // loaded and surface an internal message.
-                    disabled={gisReady !== true}
+                    disabled={gisReady !== true || state.connecting}
                     onClick={() => void state.connect()}
                   >
-                    {COPY.connect}
+                    {/*
+                      The label names whichever wait is actually happening. Both
+                      windows are silent otherwise: readiness polls for up to ten
+                      seconds, and after the popup closes connect() still awaits
+                      ensure() to find or create the app's calendar.
+                    */}
+                    {state.connecting
+                      ? COPY.connecting
+                      : gisReady === null
+                        ? COPY.loadingGoogle
+                        : COPY.connect}
                   </Button>
                 )}
               </div>
@@ -209,7 +223,12 @@ export function App({ deps, checkGisReady = whenGisReady }: AppProps) {
                     value={(state.results.length / Math.max(rows.length, 1)) * 100}
                   />
                 )}
-                <MilestoneList heading={heading} rows={rows} onToggle={state.toggle} />
+                <MilestoneList
+                  heading={heading}
+                  rows={rows}
+                  onToggle={state.toggle}
+                  busy={checkingCalendar}
+                />
               </>
             )}
           </div>

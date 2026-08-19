@@ -78,6 +78,21 @@ describe('RegistrationsPage', () => {
     expect(screen.getByText(COPY.registrationsConnectPrompt)).toBeInTheDocument()
   })
 
+  it('names the wait while connecting, on this page too', async () => {
+    // Same two silent windows as the main screen, and this page is the deep link
+    // most likely to be opened cold, so it must not be the one that stays mute.
+    const d = deps([], null)
+    let release: (() => void) | undefined
+    ;(d.auth.connect as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise<void>((resolve) => (release = resolve)),
+    )
+    render(<RegistrationsPage deps={d} checkGisReady={ready} todayDate={TODAY} />)
+    await userEvent.click(await screen.findByRole('button', { name: COPY.connect }))
+    const busy = await screen.findByRole('button', { name: COPY.connecting })
+    expect(busy).toBeDisabled()
+    release?.()
+  })
+
   it('explains why Connect is disabled when the Google script never loads', async () => {
     // This page is a deep link, expected to be opened cold -- exactly where a
     // permanently-disabled Connect button with no explanation lands hardest.
