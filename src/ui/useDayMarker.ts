@@ -11,6 +11,7 @@ import {
   type Auth,
   type GisPrompt,
 } from '@/google/auth'
+import type { AppCalendar } from '@/google/appCalendar'
 import type { CalendarApi } from '@/google/calendarApi'
 import { buildPlan, type PlanItem } from '@/google/plan'
 import type { RetryDeps } from '@/lib/backoff'
@@ -21,6 +22,8 @@ export type Phase = 'idle' | 'probing' | 'ready' | 'applying' | 'done'
 export interface DayMarkerDeps {
   auth: Auth
   api: CalendarApi
+  /** Resolves the ID every `api` call targets. See `google/appCalendar.ts`. */
+  calendar: AppCalendar
   todayDate?: CalendarDate
   probeDelayMs?: number
   retryDeps?: RetryDeps
@@ -46,6 +49,7 @@ function describe(error: unknown): string {
 export function useDayMarker({
   auth,
   api,
+  calendar,
   todayDate = todayFn(),
   probeDelayMs = 400,
   retryDeps,
@@ -74,8 +78,10 @@ export function useDayMarker({
    */
   const apiRef = useRef(api)
   const authRef = useRef(auth)
+  const calendarRef = useRef(calendar)
   apiRef.current = api
   authRef.current = auth
+  calendarRef.current = calendar
 
   const start = isCalendarDate(startDate) ? startDate : null
 
@@ -146,6 +152,10 @@ export function useDayMarker({
           setPhase('idle')
           setConnected(false)
           authRef.current.clear()
+          // Dropped with the token, not kept across it: the next connect may be
+          // a different Google account, and that account has a different
+          // calendar — or none yet.
+          calendarRef.current.forget()
         }
       })()
     }, probeDelayMs)
@@ -168,6 +178,11 @@ export function useDayMarker({
         // call here would surface as an unhandled rejection.
         const promise = authRef.current.connect(prompt)
         await promise
+        // Before `connected` flips, because that flag is what releases the
+        // probe effect — and a probe without a calendar ID would request
+        // `/calendars//events`. Cached after the first success, so a reconnect
+        // costs nothing.
+        await calendarRef.current.ensure()
         setError(null)
         setConnected(true)
         return true

@@ -3,11 +3,16 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { RegistrationsPage } from '@/ui/RegistrationsPage'
 import type { Auth } from '@/google/auth'
+import type { AppCalendar } from '@/google/appCalendar'
 import type { CalendarApi, GoogleEvent } from '@/google/calendarApi'
 import { calendarDate } from '@/domain/calendarDate'
 import { Unauthorized } from '@/google/errors'
 import { COPY } from '@/ui/copy'
 import type { DayMarkerDeps } from '@/ui/useDayMarker'
+
+function stubCalendar(): AppCalendar {
+  return { ensure: vi.fn(async () => 'cal-1'), id: vi.fn(() => 'cal-1'), forget: vi.fn() }
+}
 
 function ev(
   id: string,
@@ -38,7 +43,7 @@ function deps(items: GoogleEvent[], token: string | null = 'tok'): DayMarkerDeps
     deleteEvent: vi.fn(async () => 'deleted' as const),
     listEvents: vi.fn(async () => ({ items })),
   } as unknown as CalendarApi
-  return { auth, api }
+  return { auth, api, calendar: stubCalendar() }
 }
 
 const ready = async () => true

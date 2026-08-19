@@ -4,9 +4,14 @@ import { describe, expect, it, vi } from 'vitest'
 import { App } from '@/ui/App'
 import type { DayMarkerDeps } from '@/ui/useDayMarker'
 import type { Auth } from '@/google/auth'
+import type { AppCalendar } from '@/google/appCalendar'
 import type { CalendarApi } from '@/google/calendarApi'
 import type { GoogleEventPayload } from '@/domain/eventPayload'
 import { calendarDate } from '@/domain/calendarDate'
+
+function stubCalendar(): AppCalendar {
+  return { ensure: vi.fn(async () => 'cal-1'), id: vi.fn(() => 'cal-1'), forget: vi.fn() }
+}
 
 function deps(over: Partial<DayMarkerDeps> = {}): DayMarkerDeps {
   const auth: Auth = {
@@ -21,7 +26,14 @@ function deps(over: Partial<DayMarkerDeps> = {}): DayMarkerDeps {
     listEvents: vi.fn(async () => ({ items: [] })),
     deleteEvent: vi.fn(async () => 'deleted' as const),
   }
-  return { auth, api, todayDate: calendarDate('2026-06-01'), probeDelayMs: 0, ...over }
+  return {
+    auth,
+    api,
+    calendar: stubCalendar(),
+    todayDate: calendarDate('2026-06-01'),
+    probeDelayMs: 0,
+    ...over,
+  }
 }
 
 const gisReady = async () => true

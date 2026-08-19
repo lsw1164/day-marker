@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { useDayMarker, type DayMarkerDeps } from '@/ui/useDayMarker'
 import { COPY } from '@/ui/copy'
 import { MISSING_CLIENT_ID, type Auth } from '@/google/auth'
+import type { AppCalendar } from '@/google/appCalendar'
 import type { CalendarApi, GoogleEvent } from '@/google/calendarApi'
 import { Unauthorized } from '@/google/errors'
 import { calendarDate } from '@/domain/calendarDate'
@@ -30,10 +31,20 @@ function stubApi(getEvent: (id: string) => GoogleEvent | null = () => null): Cal
   }
 }
 
+function stubCalendar(overrides: Partial<AppCalendar> = {}): AppCalendar {
+  return {
+    ensure: vi.fn(async () => 'cal-1'),
+    id: vi.fn(() => 'cal-1'),
+    forget: vi.fn(),
+    ...overrides,
+  }
+}
+
 function deps(overrides: Partial<DayMarkerDeps> = {}): DayMarkerDeps {
   return {
     auth: stubAuth(),
     api: stubApi(),
+    calendar: stubCalendar(),
     todayDate: TODAY,
     probeDelayMs: 0,
     retryDeps: RETRY,
@@ -257,5 +268,66 @@ describe('useDayMarker — submitting', () => {
     expect((api.getEvent as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
       probesBeforeReset + 13,
     )
+  })
+})
+
+/**
+ * A token alone is no longer enough to talk to Google: every request needs the
+ * ID of the calendar this app created, which lives in the user's Drive app-data
+ * folder and is fetched once per session. Connecting therefore means "signed in
+ * *and* pointed at a calendar" — the two cannot come apart without every write
+ * landing on `/calendars//events`.
+ */
+describe('useDayMarker — the app calendar', () => {
+  it('is resolved as part of connecting', async () => {
+    const calendar = stubCalendar()
+    const { result } = renderHook(() => useDayMarker(deps({ calendar })))
+
+    await act(async () => {
+      await result.current.connect()
+    })
+
+    expect(calendar.ensure).toHaveBeenCalledTimes(1)
+    expect(result.current.connected).toBe(true)
+  })
+
+  it('leaves the app disconnected, and unprobed, when it cannot be resolved', async () => {
+    const calendar = stubCalendar({
+      ensure: vi.fn(async () => {
+        throw new Error('Drive is unreachable')
+      }),
+    })
+    const api = stubApi()
+    const { result } = renderHook(() => useDayMarker(deps({ calendar, api })))
+    act(() => result.current.setStartDate('2026-01-01'))
+
+    await act(async () => {
+      expect(await result.current.connect()).toBe(false)
+    })
+
+    expect(result.current.connected).toBe(false)
+    expect(result.current.error).toBe('Drive is unreachable')
+    // The probe is gated on `connected` for exactly this reason: without an ID
+    // every probe would query a URL with an empty calendar segment.
+    expect(api.getEvent).not.toHaveBeenCalled()
+  })
+
+  it('is forgotten when a failed probe drops the connection', async () => {
+    const calendar = stubCalendar()
+    const api = stubApi()
+    ;(api.getEvent as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Unauthorized(401, 'authError', ''),
+    )
+    const { result } = renderHook(() => useDayMarker(deps({ calendar, api })))
+    act(() => result.current.setStartDate('2026-01-01'))
+    await act(async () => {
+      await result.current.connect()
+    })
+
+    await waitFor(() => expect(result.current.connected).toBe(false))
+    // Cleared alongside the token. A reconnect may be a different Google
+    // account, and reusing the previous account's calendar ID would write this
+    // user's milestones into a calendar they cannot see.
+    expect(calendar.forget).toHaveBeenCalled()
   })
 })

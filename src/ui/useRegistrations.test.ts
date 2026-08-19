@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { useRegistrations, type RegistrationsDeps } from '@/ui/useRegistrations'
 import type { Auth } from '@/google/auth'
+import type { AppCalendar } from '@/google/appCalendar'
 import type { CalendarApi, GoogleEvent } from '@/google/calendarApi'
 import { ServerError, Unauthorized } from '@/google/errors'
 import { DELETE_HALTED } from '@/google/registrations'
@@ -21,6 +22,15 @@ function ev(id: string, startDate: string, key: string, date: string): GoogleEve
   }
 }
 
+function stubCalendar(overrides: Partial<AppCalendar> = {}): AppCalendar {
+  return {
+    ensure: vi.fn(async () => 'cal-1'),
+    id: vi.fn(() => 'cal-1'),
+    forget: vi.fn(),
+    ...overrides,
+  }
+}
+
 function deps(over: Partial<RegistrationsDeps> = {}): RegistrationsDeps {
   const auth: Auth = {
     connect: vi.fn(async () => 'tok'),
@@ -36,7 +46,7 @@ function deps(over: Partial<RegistrationsDeps> = {}): RegistrationsDeps {
       items: [ev('a', '2025-03-14', 'd100', '2025-06-21'), ev('b', '2025-03-14', 'y1', '2026-03-14')],
     })),
   } as unknown as CalendarApi
-  return { auth, api, retryDeps: RETRY, ...over }
+  return { auth, api, calendar: stubCalendar(), retryDeps: RETRY, ...over }
 }
 
 describe('useRegistrations', () => {
@@ -581,7 +591,9 @@ describe('useRegistrations', () => {
           return { items: [] }
         }),
       } as unknown as CalendarApi
-      return { auth, api, retryDeps: RETRY }
+      // Rebuilt fresh too, for the same reason as auth/api: the ref pattern
+      // has to tolerate a caller that keeps none of its dependencies stable.
+      return { auth, api, calendar: stubCalendar(), retryDeps: RETRY }
     }
 
     const { result, rerender } = renderHook(() => useRegistrations(freshDeps()))
@@ -594,5 +606,79 @@ describe('useRegistrations', () => {
     // Loading is driven by [connected, loadNonce] alone. A caller rebuilding
     // api/auth every render must not add a single extra request.
     expect(listEventsCalls).toBe(1)
+  })
+})
+
+/**
+ * This page can be reached with a live token but without having gone through
+ * this hook's own `connect` — the user connects on `/` and navigates here. So
+ * the calendar has to be resolved by the load itself, not only by connecting,
+ * or the very first query would list events from `/calendars//events`.
+ */
+describe('useRegistrations — the app calendar', () => {
+  it('is resolved before the list is queried', async () => {
+    const order: string[] = []
+    const calendar = stubCalendar({
+      ensure: vi.fn(async () => {
+        order.push('ensure')
+        return 'cal-1'
+      }),
+    })
+    const d = deps({ calendar })
+    ;(d.api.listEvents as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      order.push('list')
+      return { items: [] }
+    })
+
+    const { result } = renderHook(() => useRegistrations(d))
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+
+    expect(order).toEqual(['ensure', 'list'])
+  })
+
+  it('is resolved as part of connecting', async () => {
+    const calendar = stubCalendar()
+    const d = deps({ calendar })
+    ;(d.auth.token as ReturnType<typeof vi.fn>).mockReturnValue(null)
+    const { result } = renderHook(() => useRegistrations(d))
+
+    await act(async () => {
+      await result.current.connect()
+    })
+
+    expect(calendar.ensure).toHaveBeenCalled()
+    expect(result.current.connected).toBe(true)
+  })
+
+  it('leaves the page disconnected, and unqueried, when it cannot be resolved', async () => {
+    const calendar = stubCalendar({
+      ensure: vi.fn(async () => {
+        throw new Error('Drive is unreachable')
+      }),
+    })
+    const d = deps({ calendar })
+    ;(d.auth.token as ReturnType<typeof vi.fn>).mockReturnValue(null)
+    const { result } = renderHook(() => useRegistrations(d))
+
+    await act(async () => {
+      expect(await result.current.connect()).toBe(false)
+    })
+
+    expect(result.current.connected).toBe(false)
+    expect(result.current.error).toBe('Drive is unreachable')
+    expect(d.api.listEvents).not.toHaveBeenCalled()
+  })
+
+  it('is forgotten when an expired token drops the connection', async () => {
+    const calendar = stubCalendar()
+    const d = deps({ calendar })
+    ;(d.api.listEvents as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Unauthorized(401, 'authError', ''),
+    )
+
+    const { result } = renderHook(() => useRegistrations(d))
+    await waitFor(() => expect(result.current.connected).toBe(false))
+
+    expect(calendar.forget).toHaveBeenCalled()
   })
 })

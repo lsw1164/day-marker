@@ -1,8 +1,16 @@
 import type { GoogleEventPayload } from '@/domain/eventPayload'
-import { ApiError, Conflict, NotFound, RateLimited, ServerError, Unauthorized } from '@/google/errors'
+import { readError, toError } from '@/google/errors'
 
-export const EVENTS_URL =
-  'https://www.googleapis.com/calendar/v3/calendars/primary/events'
+export const CALENDARS_URL = 'https://www.googleapis.com/calendar/v3/calendars'
+
+/**
+ * Every read and write now targets the secondary calendar this app created,
+ * whose ID Google assigns at creation time — there is no constant to hardcode
+ * the way `primary` once was. See `google/appCalendar.ts` for how it is found.
+ */
+export function eventsUrl(calendarId: string): string {
+  return `${CALENDARS_URL}/${encodeURIComponent(calendarId)}/events`
+}
 
 export interface GoogleEvent {
   id: string
@@ -22,6 +30,17 @@ export interface EventListPage {
   nextPageToken?: string
 }
 
+export interface GoogleCalendar {
+  id: string
+  summary?: string
+}
+
+export interface CalendarsApi {
+  /** null when the user has deleted the calendar out from under the app. */
+  getCalendar(id: string): Promise<GoogleCalendar | null>
+  insertCalendar(summary: string): Promise<GoogleCalendar>
+}
+
 export interface CalendarApi {
   getEvent(id: string): Promise<GoogleEvent | null>
   insertEvent(payload: GoogleEventPayload): Promise<GoogleEvent>
@@ -33,56 +52,8 @@ export interface CalendarApi {
   deleteEvent(id: string): Promise<'deleted' | 'alreadyGone'>
 }
 
-interface GoogleErrorBody {
-  error?: { code?: number; message?: string; errors?: { reason?: string }[] }
-}
-
-async function readError(response: Response): Promise<{ reason: string; detail: string }> {
-  try {
-    const body = (await response.json()) as GoogleErrorBody
-    return {
-      reason: body.error?.errors?.[0]?.reason ?? 'unknown',
-      detail: body.error?.message ?? '',
-    }
-  } catch {
-    return { reason: 'unknown', detail: '' }
-  }
-}
-
-/**
- * Every reason Google returns on a 403 that means "too many requests" rather
- * than "you may not do this". All four must map to RateLimited: classifying one
- * as Unauthorized makes `isRetryable` refuse it *and* trips `applyPlan`'s
- * `halted` flag, so a transient quota blip would report the connection as
- * expired and cancel every write still queued behind it.
- */
-const QUOTA_REASONS: ReadonlySet<string> = new Set([
-  'rateLimitExceeded',
-  'userRateLimitExceeded',
-  'quotaExceeded',
-  'dailyLimitExceeded',
-])
-
-function toError(status: number, reason: string, detail: string): ApiError {
-  if (status === 401) return new Unauthorized(status, reason, detail)
-  if (status === 403) {
-    // 403 is overloaded: quota problems are retryable, permission problems are not.
-    return QUOTA_REASONS.has(reason)
-      ? new RateLimited(status, reason, detail)
-      : new Unauthorized(status, reason, detail)
-  }
-  if (status === 404) return new NotFound(status, reason, detail)
-  if (status === 409) return new Conflict(status, reason, detail)
-  if (status === 429) return new RateLimited(status, reason, detail)
-  if (status >= 500) return new ServerError(status, reason, detail)
-  return new ApiError(status, reason, detail)
-}
-
-export function createCalendarApi(
-  getToken: () => string,
-  fetchImpl: typeof fetch = fetch,
-): CalendarApi {
-  async function request(
+function requester(getToken: () => string, fetchImpl: typeof fetch) {
+  return async function request(
     url: string,
     method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     body?: unknown,
@@ -96,28 +67,60 @@ export function createCalendarApi(
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
   }
+}
 
-  async function unwrap(response: Response): Promise<GoogleEvent> {
-    if (response.ok) return (await response.json()) as GoogleEvent
-    const { reason, detail } = await readError(response)
-    throw toError(response.status, reason, detail)
+async function unwrap<T>(response: Response): Promise<T> {
+  if (response.ok) return (await response.json()) as T
+  const { reason, detail } = await readError(response)
+  throw toError(response.status, reason, detail)
+}
+
+export function createCalendarsApi(
+  getToken: () => string,
+  fetchImpl: typeof fetch = fetch,
+): CalendarsApi {
+  const request = requester(getToken, fetchImpl)
+  return {
+    async getCalendar(id) {
+      const response = await request(`${CALENDARS_URL}/${encodeURIComponent(id)}`, 'GET')
+      // The pointer outlived the calendar: the user deleted it in Google
+      // Calendar. An expected answer, not a failure.
+      if (response.status === 404) return null
+      return unwrap<GoogleCalendar>(response)
+    },
+    async insertCalendar(summary) {
+      return unwrap<GoogleCalendar>(await request(CALENDARS_URL, 'POST', { summary }))
+    },
   }
+}
+
+/**
+ * `getCalendarId` is a function, not a string: the ID is only known after the
+ * user connects, which happens long after this factory runs.
+ */
+export function createCalendarApi(
+  getToken: () => string,
+  getCalendarId: () => string,
+  fetchImpl: typeof fetch = fetch,
+): CalendarApi {
+  const request = requester(getToken, fetchImpl)
+  const eventsFor = () => eventsUrl(getCalendarId())
 
   return {
     async getEvent(id) {
-      const response = await request(`${EVENTS_URL}/${id}`, 'GET')
+      const response = await request(`${eventsFor()}/${id}`, 'GET')
       // A missing event is an expected answer here, not a failure.
       if (response.status === 404) return null
-      return unwrap(response)
+      return unwrap<GoogleEvent>(response)
     },
     async insertEvent(payload) {
-      return unwrap(await request(EVENTS_URL, 'POST', payload))
+      return unwrap<GoogleEvent>(await request(eventsFor(), 'POST', payload))
     },
     async patchEvent(id, payload) {
-      return unwrap(await request(`${EVENTS_URL}/${id}`, 'PATCH', payload))
+      return unwrap<GoogleEvent>(await request(`${eventsFor()}/${id}`, 'PATCH', payload))
     },
     async listEvents({ privateExtendedProperty, pageToken }) {
-      const url = new URL(EVENTS_URL)
+      const url = new URL(eventsFor())
       url.searchParams.set('privateExtendedProperty', privateExtendedProperty)
       if (pageToken) url.searchParams.set('pageToken', pageToken)
       // showDeleted is deliberately left at its default of false: a cancelled
@@ -142,7 +145,7 @@ export function createCalendarApi(
       throw toError(response.status, reason, detail)
     },
     async deleteEvent(id) {
-      const response = await request(`${EVENTS_URL}/${id}`, 'DELETE')
+      const response = await request(`${eventsFor()}/${id}`, 'DELETE')
       if (response.ok) return 'deleted'
       // 404: never existed or fully purged. 410: existed, already deleted. Both
       // mean the end state we wanted already holds.

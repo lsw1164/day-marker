@@ -1,4 +1,29 @@
-export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events'
+/**
+ * Writes only to calendars this app itself created — it grants no access to the
+ * user's primary calendar or to any calendar the app did not make. That is what
+ * keeps it off Google's *sensitive* list, and therefore what lets the app be
+ * published without sensitive-scope verification and without the 100-user cap.
+ */
+export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.app.created'
+
+/**
+ * A hidden per-app folder in the user's Drive. It holds exactly one thing: the
+ * ID of the calendar above.
+ *
+ * This is not a convenience. `calendar.app.created` is not an accepted scope on
+ * `calendarList.list`, so there is no API call that answers "which calendar did
+ * I make for this user?" — the ID Google assigns at creation is the first fact
+ * about this app that cannot be derived from the user's input. Keeping it in the
+ * user's own account rather than in localStorage is what preserves the two
+ * properties the app is built on: no backend, and a registration that stays
+ * findable from another device or a year later.
+ *
+ * Also non-sensitive, per Google's Drive scope table.
+ */
+export const DRIVE_APPDATA_SCOPE = 'https://www.googleapis.com/auth/drive.appdata'
+
+/** Requested and verified as a unit; a partial grant is not a usable app. */
+export const SCOPES = [CALENDAR_SCOPE, DRIVE_APPDATA_SCOPE] as const
 
 /**
  * Sentinel for "VITE_GOOGLE_CLIENT_ID was never set". The human-readable copy
@@ -116,7 +141,7 @@ export function createAuth(
     if (client) return client
     client = gis.accounts.oauth2.initTokenClient({
       client_id: clientId,
-      scope: CALENDAR_SCOPE,
+      scope: SCOPES.join(' '),
       callback: (response) => {
         const pending = settle
         settle = null
@@ -125,7 +150,7 @@ export function createAuth(
           pending.reject(new AuthError(response.error ?? 'Google returned no access token'))
           return
         }
-        if (!gis.accounts.oauth2.hasGrantedAllScopes(response, CALENDAR_SCOPE)) {
+        if (!gis.accounts.oauth2.hasGrantedAllScopes(response, ...SCOPES)) {
           pending.reject(new AuthError('Calendar permission was not granted'))
           return
         }

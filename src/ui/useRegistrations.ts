@@ -6,6 +6,7 @@ import {
   SIGN_IN_IN_PROGRESS,
   type Auth,
 } from '@/google/auth'
+import type { AppCalendar } from '@/google/appCalendar'
 import type { CalendarApi } from '@/google/calendarApi'
 import { Unauthorized } from '@/google/errors'
 import {
@@ -24,6 +25,8 @@ export type RegistrationsPhase = 'idle' | 'loading' | 'ready' | 'deleting' | 'do
 export interface RegistrationsDeps {
   auth: Auth
   api: CalendarApi
+  /** Resolves the ID every `api` call targets. See `google/appCalendar.ts`. */
+  calendar: AppCalendar
   retryDeps?: RetryDeps
 }
 
@@ -43,14 +46,16 @@ function isHaltedRun(results: DeleteResult[]): boolean {
   return results.some((r) => r.error === DELETE_HALTED)
 }
 
-export function useRegistrations({ auth, api, retryDeps }: RegistrationsDeps) {
+export function useRegistrations({ auth, api, calendar, retryDeps }: RegistrationsDeps) {
   // Read through refs for the same reason useDayMarker does: a caller building a
   // fresh deps object each render would otherwise retrigger the load effect on
   // every render, looping real Google requests against the user's quota.
   const apiRef = useRef(api)
   const authRef = useRef(auth)
+  const calendarRef = useRef(calendar)
   apiRef.current = api
   authRef.current = auth
+  calendarRef.current = calendar
 
   // The token is the single source of truth, so arriving from the other route
   // with a live token does not read as "not connected".
@@ -96,6 +101,11 @@ export function useRegistrations({ auth, api, retryDeps }: RegistrationsDeps) {
     setPhase('loading')
     void (async () => {
       try {
+        // Resolved here as well as in `connect`, because `connected` can be
+        // seeded from a token this hook never asked for — the user connected on
+        // `/` and navigated. Cached after the first call, so the common case
+        // costs nothing.
+        await calendarRef.current.ensure()
         const next = await listRegistrations(apiRef.current)
         if (loadToken.current !== ticket) return
         setRegistrations(next)
@@ -118,6 +128,7 @@ export function useRegistrations({ auth, api, retryDeps }: RegistrationsDeps) {
         if (e instanceof Unauthorized) {
           setConnected(false)
           authRef.current.clear()
+          calendarRef.current.forget()
         }
       }
     })()
@@ -130,6 +141,8 @@ export function useRegistrations({ auth, api, retryDeps }: RegistrationsDeps) {
       // awaited inside the try so a handler is always attached.
       const promise = authRef.current.connect('')
       await promise
+      // Before `connected` flips, which is what releases the load effect.
+      await calendarRef.current.ensure()
       setError(null)
       setConnected(true)
       return true
@@ -159,6 +172,7 @@ export function useRegistrations({ auth, api, retryDeps }: RegistrationsDeps) {
     setResults([])
     setConnected(false)
     authRef.current.clear()
+    calendarRef.current.forget()
   }, [])
 
   const beginConfirm = useCallback(

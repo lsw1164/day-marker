@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createCalendarApi, EVENTS_URL } from '@/google/calendarApi'
+import {
+  CALENDARS_URL,
+  createCalendarApi,
+  createCalendarsApi,
+  eventsUrl,
+} from '@/google/calendarApi'
 import {
   Conflict,
   NotFound,
@@ -36,12 +41,19 @@ function googleError(code: number, reason: string): unknown {
   return { error: { code, message: reason, errors: [{ domain: 'global', reason }] } }
 }
 
+const CALENDAR_ID = 'cal-1@group.calendar.google.com'
+const EVENTS_URL = eventsUrl(CALENDAR_ID)
+
 function apiWith(fetchImpl: typeof fetch) {
-  return createCalendarApi(() => 'token-123', fetchImpl)
+  return createCalendarApi(() => 'token-123', () => CALENDAR_ID, fetchImpl)
+}
+
+function calendarsWith(fetchImpl: typeof fetch) {
+  return createCalendarsApi(() => 'token-123', fetchImpl)
 }
 
 describe('getEvent', () => {
-  it('sends a bearer token to the primary calendar', async () => {
+  it('sends a bearer token to the app calendar', async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse(200, { id: 'dmabc12', status: 'confirmed', summary: 'Day 100' }),
     ) as unknown as typeof fetch
@@ -72,6 +84,69 @@ describe('getEvent', () => {
       jsonResponse(404, googleError(404, 'notFound')),
     ) as unknown as typeof fetch
     expect(await apiWith(fetchImpl).getEvent('dmabc12')).toBeNull()
+  })
+})
+
+describe('eventsUrl', () => {
+  /**
+   * Secondary calendar IDs are email-shaped — `…@group.calendar.google.com`.
+   * Interpolated raw they still resolve on Google's side today, but the ID is a
+   * server-assigned string this app now carries into every path segment, so it
+   * is escaped rather than trusted.
+   */
+  it('escapes the calendar ID it is given', () => {
+    expect(eventsUrl('a b@group.calendar.google.com')).toBe(
+      `${CALENDARS_URL}/a%20b%40group.calendar.google.com/events`,
+    )
+  })
+
+  /**
+   * The ID is not known when the api is constructed — it arrives from Drive
+   * after the user connects. Capturing it at construction time would send every
+   * request to `/calendars//events`.
+   */
+  it('is read at call time, not at construction time', async () => {
+    let id = 'first'
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(200, { id: 'dmabc12', status: 'confirmed' }),
+    ) as unknown as typeof fetch
+    const api = createCalendarApi(() => 'token-123', () => id, fetchImpl)
+
+    await api.getEvent('dmabc12')
+    id = 'second'
+    await api.getEvent('dmabc12')
+
+    const calls = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls
+    expect(String(calls[0]![0])).toContain('/first/')
+    expect(String(calls[1]![0])).toContain('/second/')
+  })
+})
+
+describe('calendars', () => {
+  it('returns null when the calendar is gone', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(404, googleError(404, 'notFound')),
+    ) as unknown as typeof fetch
+    expect(await calendarsWith(fetchImpl).getCalendar('cal-1')).toBeNull()
+  })
+
+  it('returns the calendar when it still exists', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(200, { id: 'cal-1', summary: 'Day Marker' }),
+    ) as unknown as typeof fetch
+    expect(await calendarsWith(fetchImpl).getCalendar('cal-1')).toMatchObject({ id: 'cal-1' })
+  })
+
+  it('creates a secondary calendar with the given name', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(200, { id: 'cal-new', summary: 'Day Marker' }),
+    ) as unknown as typeof fetch
+    const created = await calendarsWith(fetchImpl).insertCalendar('Day Marker')
+    const [url, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!
+    expect(url).toBe(CALENDARS_URL)
+    expect((init as RequestInit).method).toBe('POST')
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({ summary: 'Day Marker' })
+    expect(created.id).toBe('cal-new')
   })
 })
 

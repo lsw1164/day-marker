@@ -3,6 +3,8 @@ import {
   AuthError,
   CALENDAR_SCOPE,
   createAuth,
+  DRIVE_APPDATA_SCOPE,
+  SCOPES,
   MISSING_CLIENT_ID,
   SIGN_IN_CANCELLED,
   SIGN_IN_IN_PROGRESS,
@@ -16,6 +18,8 @@ interface Harness {
   fireError: (error: unknown) => void
   requestAccessToken: ReturnType<typeof vi.fn>
   grantedScopes: string[]
+  /** The space-delimited scope string handed to GIS at initTokenClient time. */
+  requestedScope: string
 }
 
 function harness(): Harness {
@@ -24,16 +28,19 @@ function harness(): Harness {
   const requestAccessToken = vi.fn()
   const state: Harness = {
     requestAccessToken,
-    grantedScopes: [CALENDAR_SCOPE],
+    grantedScopes: [...SCOPES],
+    requestedScope: '',
     fire: (response) => callback(response),
     fireError: (error) => errorCallback(error),
     gis: {
       accounts: {
         oauth2: {
           initTokenClient: (config: {
+            scope: string
             callback: (r: unknown) => void
             error_callback?: (e: unknown) => void
           }) => {
+            state.requestedScope = config.scope
             callback = config.callback
             errorCallback = config.error_callback ?? (() => {})
             return { requestAccessToken }
@@ -46,6 +53,44 @@ function harness(): Harness {
   }
   return state
 }
+
+describe('scopes', () => {
+  /**
+   * Golden values. Both of these are on Google's *non-sensitive* lists, which is
+   * the entire reason the app can ship without sensitive-scope verification and
+   * without the 100-user cap. Swapping either one for a broader scope —
+   * `calendar.events`, `calendar`, `drive.file` — silently changes the app's
+   * launch position from "publish today" to "wait weeks for review", so the
+   * exact strings are pinned here rather than left to a rename.
+   */
+  it('are exactly the two non-sensitive scopes', () => {
+    expect(SCOPES).toEqual([
+      'https://www.googleapis.com/auth/calendar.app.created',
+      'https://www.googleapis.com/auth/drive.appdata',
+    ])
+  })
+
+  it('are requested together, space-delimited, as GIS expects', () => {
+    const h = harness()
+    void createAuth('client-1', () => h.gis).connect()
+    expect(h.requestedScope).toBe(`${CALENDAR_SCOPE} ${DRIVE_APPDATA_SCOPE}`)
+  })
+
+  /**
+   * GIS renders one checkbox per scope, so a user can grant the calendar and
+   * refuse the Drive app-data folder. Without this check the app would connect,
+   * fail to read its pointer, and create a second "Day Marker" calendar on every
+   * visit — so a partial grant has to be rejected as loudly as no grant at all.
+   */
+  it('reject a partial grant that leaves out the Drive app-data folder', async () => {
+    const h = harness()
+    h.grantedScopes = [CALENDAR_SCOPE]
+    const auth = createAuth('client-1', () => h.gis)
+    const pending = auth.connect()
+    h.fire({ access_token: 'tok', expires_in: 3600, scope: CALENDAR_SCOPE })
+    await expect(pending).rejects.toThrow(AuthError)
+  })
+})
 
 describe('createAuth.connect', () => {
   it('requests a token synchronously so the popup is not blocked', () => {
